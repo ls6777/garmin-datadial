@@ -36,27 +36,34 @@ class Metrics {
 
     //! Current heart rate in bpm. Uses the live reading when there is one,
     //! otherwise the newest valid sample from the heart rate history.
-    //! @return Heart rate string
-    public static function heartRate() as String {
+    //! @return Heart rate, or null if unavailable
+    public static function heartRateValue() as Number? {
         var activityInfo = Activity.getActivityInfo();
         if (activityInfo != null && activityInfo.currentHeartRate != null) {
-            return (activityInfo.currentHeartRate as Number).format("%d");
+            return activityInfo.currentHeartRate;
         }
 
         if (ActivityMonitor has :getHeartRateHistory) {
             var sample = ActivityMonitor.getHeartRateHistory(1, true).next();
             if (sample != null && sample.heartRate != null
                     && sample.heartRate != ActivityMonitor.INVALID_HR_SAMPLE) {
-                return (sample.heartRate as Number).format("%d");
+                return sample.heartRate;
             }
         }
-        return NO_VALUE;
+        return null;
     }
 
     //! Battery charge in whole percent.
     //! @return Battery percentage as a Number (0..100)
     public static function batteryPercent() as Number {
         return (System.getSystemStats().battery + 0.5).toNumber();
+    }
+
+    //! Whether the watch is currently charging.
+    //! @return true while on the charger
+    public static function charging() as Boolean {
+        var stats = System.getSystemStats();
+        return (stats has :charging) && stats.charging == true;
     }
 
     //! Steps taken today.

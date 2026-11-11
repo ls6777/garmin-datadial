@@ -421,7 +421,8 @@ class DataDialView extends WatchUi.WatchFace {
     //! @param dc Device context
     private function drawDial(dc as Dc) as Void {
         for (var i = 0; i < 60; i++) {
-            var p = polar(i / 60.0 * Math.PI * 2, _radius * 0.94);
+            // Centered so the largest dots end 2 px inside the display edge.
+            var p = polar(i / 60.0 * Math.PI * 2, (_radius - 7).toFloat());
             var size = (i % 15 == 0) ? 5 : ((i % 5 == 0) ? 4 : 2);
             dc.setColor((i % 5 == 0) ? _ink : _inkMinor, Graphics.COLOR_TRANSPARENT);
             dc.fillCircle(p[0], p[1], size);

@@ -603,13 +603,14 @@ class DataDialView extends WatchUi.WatchFace {
 
     //! Burn-in-safe sleep face (only used if always-on is enabled on AMOLED):
     //! the dot dial and the hollow hour and minute hands, dimmed, with no
-    //! stats and no seconds hand. Everything is shifted each minute, by more
-    //! than the size of a dot over the cycle, so no pixel stays lit in place.
+    //! stats and no seconds hand. Following Garmin's always-on guidance
+    //! (move static elements up to four pixels every minute), everything is
+    //! shifted by up to 2 px, cycling through nine positions, one per minute.
     //! @param dc Device context
     //! @param clockTime Current clock time
     private function drawLowPower(dc as Dc, clockTime as System.ClockTime) as Void {
-        var shiftX = (clockTime.min % 5) * 4 - 8;
-        var shiftY = ((clockTime.min / 5) % 5) * 4 - 8;
+        var shiftX = (clockTime.min % 3 - 1) * 2;
+        var shiftY = ((clockTime.min / 3) % 3 - 1) * 2;
 
         _cx += shiftX;
         _cy += shiftY;

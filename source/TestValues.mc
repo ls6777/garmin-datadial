@@ -24,6 +24,12 @@ class TestValues {
     public static function batteryPercent() as Number? {
         return null;
     }
+
+    //! Battery estimate text that replaces the real one.
+    //! @return Always null: use the real estimate
+    public static function batteryEstimate() as String? {
+        return null;
+    }
 }
 
 //! Test build: fixed values chosen to stress the layout.
@@ -51,5 +57,11 @@ class TestValues {
     //! @return The fixed level, 0..100
     public static function batteryPercent() as Number? {
         return 100;
+    }
+
+    //! Battery estimate text that replaces the real one.
+    //! @return The fixed estimate
+    public static function batteryEstimate() as String? {
+        return "31d";
     }
 }

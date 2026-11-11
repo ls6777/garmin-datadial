@@ -59,6 +59,21 @@ class Metrics {
         return (System.getSystemStats().battery + 0.5).toNumber();
     }
 
+    //! The watch's own estimate of remaining battery life: whole days, or
+    //! whole hours when under a day, e.g. "12d" or "9h".
+    //! @return Estimate string, or null if the watch does not provide one
+    public static function batteryEstimate() as String? {
+        var stats = System.getSystemStats();
+        if (!(stats has :batteryInDays) || stats.batteryInDays == null) {
+            return null;
+        }
+        var days = stats.batteryInDays as Float;
+        if (days >= 1.0) {
+            return days.format("%d") + "d";
+        }
+        return (days * 24.0).format("%d") + "h";
+    }
+
     //! Whether the watch is currently charging.
     //! @return true while on the charger
     public static function charging() as Boolean {

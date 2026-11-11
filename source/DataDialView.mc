@@ -25,7 +25,9 @@ class DataDialView extends WatchUi.WatchFace {
     private const COLOR_MINUTE_DOT = 0xB0B0B0;
     private const COLOR_ACCENT = 0x2EA3F2;
     private const COLOR_CHARGING = 0x3DDC57;
-    private const COLOR_LOW_POWER = 0x808080;
+    //! Dimmed colors used by the always-on sleep view.
+    private const COLOR_SLEEP = 0x9A9A9A;
+    private const COLOR_SLEEP_MINOR = 0x5A5A5A;
 
     //! Field slots, clockwise from 12 o'clock at 45-degree steps.
     private const SLOT_DATE = 0;
@@ -62,6 +64,11 @@ class DataDialView extends WatchUi.WatchFace {
     private var _icons as Array<BitmapResource?> = new Array<BitmapResource?>[8];
     private var _iconSize as Number = 0;
 
+    //! Colors of the dial, hands and hub: full brightness while awake,
+    //! dimmed in the always-on sleep view.
+    private var _ink as Number = COLOR_WHITE;
+    private var _inkMinor as Number = COLOR_MINUTE_DOT;
+
     private var _awake as Boolean = true;
     private var _burnInProtection as Boolean = false;
 
@@ -69,6 +76,11 @@ class DataDialView extends WatchUi.WatchFace {
     private var _values as Array<String> = new Array<String>[8];
     private var _weekday as String = "";
     private var _batteryPercent as Number = 0;
+    //! The watch's battery estimate ("12d" or "9h"), or "" if unavailable,
+    //! shown under the battery percentage in the same font, and its width as
+    //! currently drawn in the stats image.
+    private var _batteryEstimate as String = "";
+    private var _estimateWidth as Number = 0;
     private var _charging as Boolean = false;
 
     //! Set on wake-up so the next update re-reads every value.
@@ -185,7 +197,8 @@ class DataDialView extends WatchUi.WatchFace {
     //! - steps: every wake-up, then every STEPS_PERIOD seconds
     //! - floors, calories, elevation, temperature: every wake-up, then every
     //!   SLOW_PERIOD seconds
-    //! - battery: once a minute, or every update while charging
+    //! - battery and its days-remaining estimate: once a minute, or every
+    //!   update while charging
     //! - date: on wake-up and when midnight passes; redrawn only if the day
     //!   changed
     //! While asleep the face is updated at most once a minute, and each of
@@ -225,6 +238,16 @@ class DataDialView extends WatchUi.WatchFace {
             var fixedPercent = TestValues.batteryPercent();
             _batteryPercent = (fixedPercent != null) ? fixedPercent : Metrics.batteryPercent();
             setValue(SLOT_BATTERY, _batteryPercent.format("%d") + "%");
+
+            var fixedEstimate = TestValues.batteryEstimate();
+            var estimate = (fixedEstimate != null) ? fixedEstimate : Metrics.batteryEstimate();
+            if (estimate == null) {
+                estimate = "";
+            }
+            if (!estimate.equals(_batteryEstimate)) {
+                _batteryEstimate = estimate;
+                _dirtySlots |= (1 << SLOT_BATTERY);
+            }
         }
 
         // The day changes only at midnight: look at the date on wake-up (the
@@ -341,9 +364,20 @@ class DataDialView extends WatchUi.WatchFace {
         var angle = slot / SLOT_COUNT.toFloat() * Math.PI * 2;
         var outer = polar(angle, _radius * 0.68);
         var width = dc.getTextWidthInPixels(_values[slot], _valueFont);
-        var clearWidth = ((width > _drawnWidth[slot]) ? width : _drawnWidth[slot]) + 8;
-        var clearHeight = dc.getFontHeight(_valueFont) + 6;
+        var clearWidth = ((width > _drawnWidth[slot]) ? width : _drawnWidth[slot]);
+        var clearHeight = dc.getFontHeight(_valueFont);
         _drawnWidth[slot] = width;
+
+        if (slot == SLOT_BATTERY) {
+            // The percentage and estimate are stacked; clear both lines.
+            var estimateWidth = dc.getTextWidthInPixels(_batteryEstimate, _valueFont);
+            var widest = (estimateWidth > _estimateWidth) ? estimateWidth : _estimateWidth;
+            clearWidth = (widest > clearWidth) ? widest : clearWidth;
+            clearHeight += 2 * batteryLineOffset();
+            _estimateWidth = estimateWidth;
+        }
+        clearWidth += 8;
+        clearHeight += 6;
 
         dc.setClip(outer[0] - clearWidth / 2, outer[1] - clearHeight / 2, clearWidth, clearHeight);
         dc.drawBitmap(0, 0, layer);
@@ -368,7 +402,7 @@ class DataDialView extends WatchUi.WatchFace {
         for (var i = 0; i < 60; i++) {
             var p = polar(i / 60.0 * Math.PI * 2, _radius * 0.94);
             var size = (i % 15 == 0) ? 5 : ((i % 5 == 0) ? 4 : 2);
-            dc.setColor((i % 5 == 0) ? COLOR_WHITE : COLOR_MINUTE_DOT, Graphics.COLOR_TRANSPARENT);
+            dc.setColor((i % 5 == 0) ? _ink : _inkMinor, Graphics.COLOR_TRANSPARENT);
             dc.fillCircle(p[0], p[1], size);
         }
     }
@@ -429,8 +463,28 @@ class DataDialView extends WatchUi.WatchFace {
         }
 
         var outer = polar(angle, _radius * 0.68);
+        var valueY = outer[1];
+
+        if (slot == SLOT_BATTERY && _batteryEstimate.length() > 0) {
+            // Percentage and estimate, same size, centered as a pair on the
+            // cell's horizontal centerline.
+            // The font's vertical centering sits glyphs about 1 px high,
+            // so both lines move down 1 px to balance them on the centerline.
+            var offset = batteryLineOffset();
+            valueY += 1 - offset;
+            dc.setColor(COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(outer[0], outer[1] + 1 + offset, _valueFont, _batteryEstimate, center);
+        }
+
         dc.setColor(low ? COLOR_RED : COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(outer[0], outer[1], _valueFont, _values[slot], center);
+        dc.drawText(outer[0], valueY, _valueFont, _values[slot], center);
+    }
+
+    //! Distance from the battery cell's centerline to the center of each of
+    //! its two lines (percentage above, estimate below).
+    //! @return Offset in pixels
+    private function batteryLineOffset() as Number {
+        return (_radius * 0.115).toNumber();
     }
 
 
@@ -527,11 +581,11 @@ class DataDialView extends WatchUi.WatchFace {
         var a = polar(angle, inner);
         var b = polar(angle, length - width / 2);
 
-        dc.setColor(COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.setColor(_ink, Graphics.COLOR_TRANSPARENT);
         dc.setPenWidth(2);
         dc.drawLine(_cx, _cy, a[0], a[1]);
         roundLine(dc, a, b, width + 4, COLOR_BG);
-        roundLine(dc, a, b, width, COLOR_WHITE);
+        roundLine(dc, a, b, width, _ink);
         roundLine(dc, polar(angle, inner + width * 0.6), polar(angle, length - width * 1.4), width - 5, COLOR_BG);
     }
 
@@ -541,33 +595,36 @@ class DataDialView extends WatchUi.WatchFace {
         var r = (_radius * 0.028).toNumber();
         dc.setColor(COLOR_BG, Graphics.COLOR_TRANSPARENT);
         dc.fillCircle(_cx, _cy, r + 2);
-        dc.setColor(COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.setColor(_ink, Graphics.COLOR_TRANSPARENT);
         dc.fillCircle(_cx, _cy, r);
         dc.setColor(COLOR_BG, Graphics.COLOR_TRANSPARENT);
         dc.fillCircle(_cx, _cy, r / 3);
     }
 
     //! Burn-in-safe sleep face (only used if always-on is enabled on AMOLED):
-    //! thin gray hands only, no fills, shifted a few pixels each minute so no
-    //! pixel stays lit in the same place.
+    //! the dot dial and the hollow hour and minute hands, dimmed, with no
+    //! stats and no seconds hand. Everything is shifted each minute, by more
+    //! than the size of a dot over the cycle, so no pixel stays lit in place.
     //! @param dc Device context
     //! @param clockTime Current clock time
     private function drawLowPower(dc as Dc, clockTime as System.ClockTime) as Void {
-        var shiftX = (clockTime.min % 5) * 2 - 4;
-        var shiftY = ((clockTime.min / 5) % 5) * 2 - 4;
-        var cx = _cx + shiftX;
-        var cy = _cy + shiftY;
+        var shiftX = (clockTime.min % 5) * 4 - 8;
+        var shiftY = ((clockTime.min / 5) % 5) * 4 - 8;
 
-        var hourAngle = ((clockTime.hour % 12) * 60 + clockTime.min) / 720.0 * Math.PI * 2;
-        var minuteAngle = clockTime.min / 60.0 * Math.PI * 2;
-        var hourLen = _radius * 0.50;
-        var minuteLen = _radius * 0.80;
+        _cx += shiftX;
+        _cy += shiftY;
+        _ink = COLOR_SLEEP;
+        _inkMinor = COLOR_SLEEP_MINOR;
 
-        dc.setColor(COLOR_LOW_POWER, Graphics.COLOR_TRANSPARENT);
-        dc.setPenWidth(3);
-        dc.drawLine(cx, cy, cx + hourLen * Math.sin(hourAngle), cy - hourLen * Math.cos(hourAngle));
-        dc.drawLine(cx, cy, cx + minuteLen * Math.sin(minuteAngle), cy - minuteLen * Math.cos(minuteAngle));
-        dc.setPenWidth(1);
+        updateHands(clockTime);
+        drawDial(dc);
+        drawHands(dc);
+        drawCap(dc);
+
+        _cx -= shiftX;
+        _cy -= shiftY;
+        _ink = COLOR_WHITE;
+        _inkMinor = COLOR_MINUTE_DOT;
     }
 
     // ------------------------------------------------------------- helpers

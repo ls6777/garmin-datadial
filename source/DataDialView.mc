@@ -203,7 +203,8 @@ class DataDialView extends WatchUi.WatchFace {
 
         if (_charging || clockTime.min != _batteryMinute) {
             _batteryMinute = clockTime.min;
-            _batteryPercent = Metrics.batteryPercent();
+            var fixedPercent = TestValues.batteryPercent();
+            _batteryPercent = (fixedPercent != null) ? fixedPercent : Metrics.batteryPercent();
             setValue(SLOT_BATTERY, _batteryPercent.format("%d") + "%");
         }
 
@@ -216,10 +217,15 @@ class DataDialView extends WatchUi.WatchFace {
         }
     }
 
-    //! Store a field's display text, noting whether it changed.
+    //! Store a field's display text, noting whether it changed. In the test
+    //! build the text is replaced by a fixed value (see TestValues.mc).
     //! @param slot Field slot
     //! @param text New display text
     private function setValue(slot as Number, text as String) as Void {
+        var fixed = TestValues.text(slot);
+        if (fixed != null) {
+            text = fixed;
+        }
         if (!_values[slot].equals(text)) {
             _values[slot] = text;
             _dirty = true;

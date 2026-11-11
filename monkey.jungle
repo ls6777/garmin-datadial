@@ -1,1 +1,4 @@
 project.manifest = manifest.xml
+
+# Normal build: real stat values (see source/TestValues.mc).
+base.excludeAnnotations = testValues

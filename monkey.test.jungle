@@ -1,0 +1,4 @@
+project.manifest = manifest.xml
+
+# Test build: fixed stat values for layout checks (see source/TestValues.mc).
+base.excludeAnnotations = realValues

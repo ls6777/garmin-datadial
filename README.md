@@ -22,8 +22,8 @@ Analog Connect IQ watch face for the Garmin fēnix 9 Pro 51mm (466×466 AMOLED).
 | 1:30 | Heart rate | Every second |
 | 3 o'clock | Battery %, with the watch's own estimate of days left underneath (hours under a day) | Once a minute; every second while charging |
 | 4:30 | Steps | Every 3 seconds |
-| 6 o'clock | Floors climbed | Every 10 seconds |
-| 7:30 | Calories | Every 10 seconds |
+| 6 o'clock | Calories | Every 10 seconds |
+| 7:30 | Floors climbed | Every 10 seconds |
 | 9 o'clock | Elevation | Every 10 seconds |
 | 10:30 | Temperature | Every 10 seconds |
 

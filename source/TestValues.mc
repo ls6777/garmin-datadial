@@ -30,6 +30,20 @@ class TestValues {
     public static function batteryEstimate() as String? {
         return null;
     }
+
+    //! Goal state that replaces the real one.
+    //! @param slot Field slot
+    //! @return Always null: use the real goal state
+    public static function goalMet(slot as Number) as Boolean? {
+        return null;
+    }
+
+    //! Goal progress that replaces the real one.
+    //! @param slot Field slot
+    //! @return Always null: use the real progress
+    public static function progress(slot as Number) as Float? {
+        return null;
+    }
 }
 
 //! Test build: fixed values chosen to stress the layout.
@@ -45,8 +59,8 @@ class TestValues {
             "160",      // 1 heart rate
             "100%",     // 2 battery
             "25000",    // 3 steps
-            "110",      // 4 floors
-            "3500",     // 5 calories
+            "3500",     // 4 calories
+            "110",      // 5 floors
             "13000ft",  // 6 elevation
             "110°"      // 7 temperature
         ] as Array<String?>;
@@ -63,5 +77,21 @@ class TestValues {
     //! @return The fixed estimate
     public static function batteryEstimate() as String? {
         return "31d";
+    }
+
+    //! Goal state that replaces the real one: floors (slot 5) has met its
+    //! goal, steps has not.
+    //! @param slot Field slot
+    //! @return Whether the goal counts as met
+    public static function goalMet(slot as Number) as Boolean? {
+        return slot == 5;
+    }
+
+    //! Goal progress that replaces the real one: steps (slot 3) part-way,
+    //! floors at its goal.
+    //! @param slot Field slot
+    //! @return Progress, 0..1
+    public static function progress(slot as Number) as Float? {
+        return (slot == 3) ? 0.6 : 1.0;
     }
 }

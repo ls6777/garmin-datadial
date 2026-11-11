@@ -25,6 +25,25 @@ class DataDialView extends WatchUi.WatchFace {
     private const COLOR_MINUTE_DOT = 0xB0B0B0;
     private const COLOR_ACCENT = 0x2EA3F2;
     private const COLOR_CHARGING = 0x3DDC57;
+    //! Value colour once a stat's daily goal is met.
+    private const COLOR_GOAL = 0x3DDC57;
+    //! Unfilled part of a goal gauge.
+    private const COLOR_GAUGE_TRACK = 0x333333;
+
+    //! Goal gauges: radius as a fraction of the screen radius, pen width,
+    //! and the gap in degrees left at each end of a cell.
+    private const GAUGE_RADIUS = 0.855;
+    private const GAUGE_PEN = 6;
+    private const GAUGE_MARGIN = 5;
+    //! Gauge fill colours, and the progress (percent of goal) at which the
+    //! fill turns yellow and then green.
+    private const GAUGE_RED = 0xFF3B30;
+    private const GAUGE_YELLOW = 0xFFD60A;
+    private const GAUGE_YELLOW_FROM = 30;
+    private const GAUGE_GREEN_FROM = 90;
+    //! How far the steps value is moved left, as a fraction of the screen
+    //! radius, to leave room for its gauge.
+    private const STEPS_VALUE_SHIFT = 0.045;
     //! Dimmed colors used by the always-on sleep view.
     private const COLOR_SLEEP = 0x9A9A9A;
     private const COLOR_SLEEP_MINOR = 0x5A5A5A;
@@ -34,8 +53,8 @@ class DataDialView extends WatchUi.WatchFace {
     private const SLOT_HEART = 1;
     private const SLOT_BATTERY = 2;
     private const SLOT_STEPS = 3;
-    private const SLOT_FLOORS = 4;
-    private const SLOT_CALORIES = 5;
+    private const SLOT_CALORIES = 4;
+    private const SLOT_FLOORS = 5;
     private const SLOT_ELEVATION = 6;
     private const SLOT_TEMPERATURE = 7;
     private const SLOT_COUNT = 8;
@@ -68,8 +87,8 @@ class DataDialView extends WatchUi.WatchFace {
         0.25,  // heart rate
         0.165, // battery (percentage and estimate)
         0.165, // steps
-        0.25,  // floors
         0.21,  // calories
+        0.25,  // floors
         0.165, // elevation
         0.25   // temperature
     ] as Array<Float>;
@@ -98,6 +117,10 @@ class DataDialView extends WatchUi.WatchFace {
     private var _batteryEstimate as String = "";
     private var _estimateWidth as Number = 0;
     private var _charging as Boolean = false;
+    //! Bit per slot whose daily goal has been met (steps and floors).
+    private var _goalsMet as Number = 0;
+    //! Goal progress per slot in whole percent, or -1 for no gauge.
+    private var _progress as Array<Number> = [-1, -1, -1, -1, -1, -1, -1, -1] as Array<Number>;
 
     //! Set on wake-up so the next update re-reads every value.
     private var _refreshAll as Boolean = true;
@@ -243,11 +266,15 @@ class DataDialView extends WatchUi.WatchFace {
         if (all || now - _stepsTime >= STEPS_PERIOD) {
             _stepsTime = now;
             setValue(SLOT_STEPS, Metrics.steps());
+            setGoal(SLOT_STEPS, Metrics.stepGoalMet());
+            setProgress(SLOT_STEPS, Metrics.stepProgress());
         }
 
         if (all || now - _slowTime >= SLOW_PERIOD) {
             _slowTime = now;
             setValue(SLOT_FLOORS, Metrics.floors());
+            setGoal(SLOT_FLOORS, Metrics.floorsGoalMet());
+            setProgress(SLOT_FLOORS, Metrics.floorsProgress());
             setValue(SLOT_CALORIES, Metrics.calories());
             setValue(SLOT_ELEVATION, Metrics.elevation());
             setValue(SLOT_TEMPERATURE, Metrics.temperature());
@@ -282,6 +309,37 @@ class DataDialView extends WatchUi.WatchFace {
                 setValue(SLOT_DATE, Metrics.dayMonth());
                 _dirtyAll = true;
             }
+        }
+    }
+
+    //! Store whether a stat's daily goal is met, noting whether it changed.
+    //! @param slot Field slot
+    //! @param met Whether the goal is met
+    private function setGoal(slot as Number, met as Boolean) as Void {
+        var fixed = TestValues.goalMet(slot);
+        if (fixed != null) {
+            met = fixed;
+        }
+        var bit = 1 << slot;
+        if (met != ((_goalsMet & bit) != 0)) {
+            _goalsMet = met ? (_goalsMet | bit) : (_goalsMet & ~bit);
+            _dirtySlots |= bit;
+        }
+    }
+
+    //! Store a stat's goal progress, noting whether it changed by at least
+    //! one percent.
+    //! @param slot Field slot
+    //! @param progress 0.0..1.0, or negative for no goal
+    private function setProgress(slot as Number, progress as Float) as Void {
+        var fixed = TestValues.progress(slot);
+        if (fixed != null) {
+            progress = fixed;
+        }
+        var percent = (progress < 0.0) ? -1 : (progress * 100).toNumber();
+        if (percent != _progress[slot]) {
+            _progress[slot] = percent;
+            _dirtySlots |= (1 << slot);
         }
     }
 
@@ -382,7 +440,7 @@ class DataDialView extends WatchUi.WatchFace {
     //! @param slot Field slot to redraw
     private function redrawSlot(dc as Dc, layer as BufferedBitmap, slot as Number) as Void {
         var angle = slot / SLOT_COUNT.toFloat() * Math.PI * 2;
-        var outer = polar(angle, _radius * 0.68);
+        var outer = valuePosition(slot);
         var font = valueFont(slot);
         var width = dc.getTextWidthInPixels(_values[slot], font);
         var clearWidth = ((width > _drawnWidth[slot]) ? width : _drawnWidth[slot]);
@@ -410,6 +468,14 @@ class DataDialView extends WatchUi.WatchFace {
             var half = (_iconSize * 0.6).toNumber() + 3;
             dc.setClip(inner[0] - half, inner[1] - half, 2 * half, 2 * half);
             dc.drawBitmap(0, 0, layer);
+            drawFieldLive(dc, slot);
+        }
+        if (_progress[slot] >= 0) {
+            var box = gaugeBounds(slot);
+            dc.setClip(box[0], box[1], box[2] - box[0], box[3] - box[1]);
+            dc.drawBitmap(0, 0, layer);
+            // The box can reach into the value text, so redraw all of the
+            // stat's live parts, not just the gauge.
             drawFieldLive(dc, slot);
         }
         dc.clearClip();
@@ -484,7 +550,9 @@ class DataDialView extends WatchUi.WatchFace {
             dc.drawText(day[0], day[1], _labelFont, _weekday, center);
         }
 
-        var outer = polar(angle, _radius * 0.68);
+        drawGauge(dc, slot);
+
+        var outer = valuePosition(slot);
         var valueY = outer[1];
 
         if (slot == SLOT_BATTERY && _batteryEstimate.length() > 0) {
@@ -498,8 +566,21 @@ class DataDialView extends WatchUi.WatchFace {
             dc.drawText(outer[0], outer[1] + 1 + offset, _valueFont, _batteryEstimate, center);
         }
 
-        dc.setColor(low ? COLOR_RED : COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        var color = low ? COLOR_RED : (((_goalsMet & (1 << slot)) != 0) ? COLOR_GOAL : COLOR_WHITE);
+        dc.setColor(color, Graphics.COLOR_TRANSPARENT);
         dc.drawText(outer[0], valueY, valueFont(slot), _values[slot], center);
+    }
+
+    //! Center of a stat's value text: on the cell's center line at 0.68 of
+    //! the radius, with the steps value moved left to clear its gauge.
+    //! @param slot Field slot
+    //! @return [x, y]
+    private function valuePosition(slot as Number) as [Number, Number] {
+        var p = polar(slot / SLOT_COUNT.toFloat() * Math.PI * 2, _radius * 0.68);
+        if (slot == SLOT_STEPS) {
+            p[0] -= (_radius * STEPS_VALUE_SHIFT).toNumber();
+        }
+        return p;
     }
 
     //! Font for a stat's value (see VALUE_SIZES).
@@ -516,6 +597,84 @@ class DataDialView extends WatchUi.WatchFace {
         return (_radius * 0.115).toNumber();
     }
 
+
+    //! Angles of a slot's goal gauge, in degrees counter-clockwise from
+    //! 3 o'clock (as drawArc expects). The gauge spans the cell, less
+    //! GAUGE_MARGIN at each end, and fills clockwise from its start.
+    //! @param slot Field slot
+    //! @return [start, end] angles
+    private function gaugeAngles(slot as Number) as [Number, Number] {
+        var center = 90 - slot * 45;
+        var half = 180 / SLOT_COUNT - GAUGE_MARGIN;
+        return [center + half, center - half];
+    }
+
+    //! Draw a slot's goal gauge: a dim track along the outer edge of the
+    //! cell, filled from its lower end upward. The whole fill takes one
+    //! colour from how far along it is: red below GAUGE_YELLOW_FROM percent of
+    //! the goal, yellow below GAUGE_GREEN_FROM, green from there and once the
+    //! goal is met. Draws nothing for a slot without a goal.
+    //! @param dc Device context
+    //! @param slot Field slot
+    private function drawGauge(dc as Dc, slot as Number) as Void {
+        var percent = _progress[slot];
+        if (percent < 0) {
+            return;
+        }
+        var ends = gaugeAngles(slot);
+        // Start at the lower end: the one with the smaller sine (further down
+        // the screen), and run toward the other end.
+        var start = ends[0];
+        var finish = ends[1];
+        if (Math.sin(Math.toRadians(finish)) < Math.sin(Math.toRadians(start))) {
+            start = ends[1];
+            finish = ends[0];
+        }
+        var direction = (finish > start) ? Graphics.ARC_COUNTER_CLOCKWISE : Graphics.ARC_CLOCKWISE;
+        var radius = _radius * GAUGE_RADIUS;
+        var met = (_goalsMet & (1 << slot)) != 0;
+        var progress = met ? 1.0 : percent / 100.0;
+
+        dc.setPenWidth(GAUGE_PEN);
+        if (progress < 1.0) {
+            dc.setColor(COLOR_GAUGE_TRACK, Graphics.COLOR_TRANSPARENT);
+            dc.drawArc(_cx, _cy, radius, direction, start, finish);
+        }
+        if (progress > 0.01) {
+            var color = (met || percent >= GAUGE_GREEN_FROM) ? COLOR_GOAL
+                    : ((percent >= GAUGE_YELLOW_FROM) ? GAUGE_YELLOW : GAUGE_RED);
+            dc.setColor(color, Graphics.COLOR_TRANSPARENT);
+            dc.drawArc(_cx, _cy, radius, direction, start, start + (finish - start) * progress);
+        }
+        dc.setPenWidth(1);
+    }
+
+    //! Screen-aligned box around a slot's goal gauge, for partial redraws.
+    //! @param slot Field slot
+    //! @return [left, top, right, bottom]
+    private function gaugeBounds(slot as Number) as [Number, Number, Number, Number] {
+        var ends = gaugeAngles(slot);
+        var inner = _radius * GAUGE_RADIUS - GAUGE_PEN;
+        var outer = _radius * GAUGE_RADIUS + GAUGE_PEN;
+        var box = [9999, 9999, -9999, -9999];
+        // Sample every 5 degrees, always including both exact ends.
+        for (var degrees = ends[1]; degrees < ends[0] + 5; degrees += 5) {
+            if (degrees > ends[0]) {
+                degrees = ends[0];
+            }
+            // Convert to this file's convention: radians clockwise from 12.
+            var angle = Math.toRadians(90 - degrees).toFloat();
+            var points = [polar(angle, inner), polar(angle, outer)];
+            for (var k = 0; k < 2; k++) {
+                var p = points[k];
+                box[0] = (p[0] < box[0]) ? p[0] : box[0];
+                box[1] = (p[1] < box[1]) ? p[1] : box[1];
+                box[2] = (p[0] > box[2]) ? p[0] : box[2];
+                box[3] = (p[1] > box[3]) ? p[1] : box[3];
+            }
+        }
+        return [box[0] - 2, box[1] - 2, box[2] + 3, box[3] + 3];
+    }
 
     //! Draw a horizontal battery gauge filled to the charge level.
     //! @param dc Device context

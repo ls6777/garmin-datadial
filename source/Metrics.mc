@@ -88,6 +88,61 @@ class Metrics {
         return (info.steps != null) ? (info.steps as Number).format("%d") : NO_VALUE;
     }
 
+    //! Whether today's step goal has been reached.
+    //! @return true if a goal is set and met
+    public static function stepGoalMet() as Boolean {
+        var info = ActivityMonitor.getInfo();
+        return goalMet(info.steps, info.stepGoal);
+    }
+
+    //! Whether today's floors-climbed goal has been reached.
+    //! @return true if a goal is set and met
+    public static function floorsGoalMet() as Boolean {
+        var info = ActivityMonitor.getInfo();
+        if (!(info has :floorsClimbed) || !(info has :floorsClimbedGoal)) {
+            return false;
+        }
+        return goalMet(info.floorsClimbed, info.floorsClimbedGoal);
+    }
+
+    //! Progress toward today's step goal.
+    //! @return 0.0..1.0, or -1.0 if no goal is set
+    public static function stepProgress() as Float {
+        var info = ActivityMonitor.getInfo();
+        return progress(info.steps, info.stepGoal);
+    }
+
+    //! Progress toward today's floors-climbed goal.
+    //! @return 0.0..1.0, or -1.0 if no goal is set
+    public static function floorsProgress() as Float {
+        var info = ActivityMonitor.getInfo();
+        if (!(info has :floorsClimbed) || !(info has :floorsClimbedGoal)) {
+            return -1.0;
+        }
+        return progress(info.floorsClimbed, info.floorsClimbedGoal);
+    }
+
+    //! A value's progress toward a goal, capped at 1.
+    //! @param value Current value, or null (counts as 0)
+    //! @param goal Goal, or null
+    //! @return 0.0..1.0, or -1.0 if there is no goal above zero
+    private static function progress(value as Number?, goal as Number?) as Float {
+        if (goal == null || goal <= 0) {
+            return -1.0;
+        }
+        var ratio = ((value != null) ? value : 0).toFloat() / goal;
+        return (ratio > 1.0) ? 1.0 : ratio;
+    }
+
+    //! Whether a value has reached a goal.
+    //! @param value Current value, or null
+    //! @param goal Goal, or null
+    //! @return true if both are present, the goal is above zero and the
+    //!         value has reached it
+    private static function goalMet(value as Number?, goal as Number?) as Boolean {
+        return value != null && goal != null && goal > 0 && value >= goal;
+    }
+
     //! Floors climbed today.
     //! @return Floor count string
     public static function floors() as String {

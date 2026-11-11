@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!-- DataDial: analog watch face with activity and sensor fields around the dial. -->
+<iq:manifest version="3" xmlns:iq="http://www.garmin.com/xml/connectiq">
+    <iq:application id="aaeeefa7b76546b89d10d8a043b02d2a" type="watchface" name="@Strings.AppName" entry="DataDialApp" launcherIcon="@Drawables.LauncherIcon" minApiLevel="5.0.0">
+        <iq:products>
+            <iq:product id="fenix9pro51mm"/>
+        </iq:products>
+        <iq:permissions>
+            <iq:uses-permission id="SensorHistory"/>
+        </iq:permissions>
+        <iq:languages>
+            <iq:language>eng</iq:language>
+        </iq:languages>
+        <iq:barrels/>
+    </iq:application>
+</iq:manifest>

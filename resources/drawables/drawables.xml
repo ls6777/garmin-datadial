@@ -1,0 +1,11 @@
+<drawables xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
+    <bitmap id="LauncherIcon" filename="launcher_icon.svg" dithering="none" />
+
+    <!-- Stat icons, scaled to 7% of the screen so they track the vector fonts. -->
+    <bitmap id="HeartIcon" filename="heart.svg" scaleX="7%" scaleY="7%" scaleRelativeTo="screen" />
+    <bitmap id="StepsIcon" filename="steps.svg" scaleX="7%" scaleY="7%" scaleRelativeTo="screen" />
+    <bitmap id="FloorsIcon" filename="floors.svg" scaleX="7%" scaleY="7%" scaleRelativeTo="screen" />
+    <bitmap id="CaloriesIcon" filename="flame.svg" scaleX="7%" scaleY="7%" scaleRelativeTo="screen" />
+    <bitmap id="ElevationIcon" filename="mountain.svg" scaleX="7%" scaleY="7%" scaleRelativeTo="screen" />
+    <bitmap id="TemperatureIcon" filename="thermometer.svg" scaleX="7%" scaleY="7%" scaleRelativeTo="screen" />
+</drawables>

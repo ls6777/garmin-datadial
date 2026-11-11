@@ -2,6 +2,8 @@
 
 Analog Connect IQ watch face for the Garmin fēnix 9 Pro 51mm (466×466 AMOLED).
 
+![DataDial in the Connect IQ simulator](docs/screenshot.png)
+
 - Hour and minute hands; a red seconds hand while the watch is awake (after a wrist raise).
 - Eight fields around the dial, clockwise from 12: date, heart rate, battery, steps,
   floors, calories, elevation, temperature.

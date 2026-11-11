@@ -60,6 +60,22 @@ class DataDialView extends WatchUi.WatchFace {
     private var _labelFont as Graphics.FontType = Graphics.FONT_XTINY;
     private var _valueFont as Graphics.FontType = Graphics.FONT_TINY;
 
+    //! Value text size per slot, as a fraction of the screen radius. Short
+    //! stats get larger text to fill their cells; long ones (steps,
+    //! elevation, the two-line battery cell) keep the base size.
+    private const VALUE_SIZES = [
+        0.165, // date
+        0.25,  // heart rate
+        0.165, // battery (percentage and estimate)
+        0.165, // steps
+        0.25,  // floors
+        0.21,  // calories
+        0.165, // elevation
+        0.25   // temperature
+    ] as Array<Float>;
+    //! Value font per slot, built from VALUE_SIZES.
+    private var _slotFonts as Array<Graphics.FontType> = new Array<Graphics.FontType>[8];
+
     //! Icon per slot; null for slots drawn in code (date text, battery gauge).
     private var _icons as Array<BitmapResource?> = new Array<BitmapResource?>[8];
     private var _iconSize as Number = 0;
@@ -134,6 +150,10 @@ class DataDialView extends WatchUi.WatchFace {
 
         _labelFont = vectorFont(["BionicBold", "RobotoCondensedBold"], 0.12, Graphics.FONT_XTINY);
         _valueFont = vectorFont(["BionicBold", "RobotoCondensedBold"], 0.165, Graphics.FONT_TINY);
+        for (var i = 0; i < SLOT_COUNT; i++) {
+            _slotFonts[i] = (VALUE_SIZES[i] == 0.165) ? _valueFont
+                    : vectorFont(["BionicBold", "RobotoCondensedBold"], VALUE_SIZES[i], Graphics.FONT_SMALL);
+        }
 
         _icons[SLOT_HEART] = loadIcon($.Rez.Drawables.HeartIcon);
         _icons[SLOT_STEPS] = loadIcon($.Rez.Drawables.StepsIcon);
@@ -330,7 +350,7 @@ class DataDialView extends WatchUi.WatchFace {
                 compositeDc.drawBitmap(0, 0, layer);
                 drawFields(compositeDc, false);
                 for (var i = 0; i < SLOT_COUNT; i++) {
-                    _drawnWidth[i] = compositeDc.getTextWidthInPixels(_values[i], _valueFont);
+                    _drawnWidth[i] = compositeDc.getTextWidthInPixels(_values[i], valueFont(i));
                 }
             } else {
                 for (var i = 0; i < SLOT_COUNT; i++) {
@@ -363,9 +383,10 @@ class DataDialView extends WatchUi.WatchFace {
     private function redrawSlot(dc as Dc, layer as BufferedBitmap, slot as Number) as Void {
         var angle = slot / SLOT_COUNT.toFloat() * Math.PI * 2;
         var outer = polar(angle, _radius * 0.68);
-        var width = dc.getTextWidthInPixels(_values[slot], _valueFont);
+        var font = valueFont(slot);
+        var width = dc.getTextWidthInPixels(_values[slot], font);
         var clearWidth = ((width > _drawnWidth[slot]) ? width : _drawnWidth[slot]);
-        var clearHeight = dc.getFontHeight(_valueFont);
+        var clearHeight = dc.getFontHeight(font);
         _drawnWidth[slot] = width;
 
         if (slot == SLOT_BATTERY) {
@@ -477,7 +498,14 @@ class DataDialView extends WatchUi.WatchFace {
         }
 
         dc.setColor(low ? COLOR_RED : COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(outer[0], valueY, _valueFont, _values[slot], center);
+        dc.drawText(outer[0], valueY, valueFont(slot), _values[slot], center);
+    }
+
+    //! Font for a stat's value (see VALUE_SIZES).
+    //! @param slot Field slot
+    //! @return The font
+    private function valueFont(slot as Number) as Graphics.FontType {
+        return _slotFonts[slot];
     }
 
     //! Distance from the battery cell's centerline to the center of each of

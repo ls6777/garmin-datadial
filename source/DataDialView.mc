@@ -41,6 +41,11 @@ class DataDialView extends WatchUi.WatchFace {
     //! Battery level (percent) below which the battery icon and value turn red.
     private const BATTERY_LOW = 20;
 
+    //! How often the hands move: the minute hand every MINUTE_HAND_STEP
+    //! seconds, the hour hand every HOUR_HAND_STEP minutes.
+    private const MINUTE_HAND_STEP = 10;
+    private const HOUR_HAND_STEP = 10;
+
     //! Seconds between re-reads while awake. Everything is also re-read on
     //! every wake-up. Heart rate is read every update, battery once a
     //! minute, and the date when the day changes.
@@ -76,13 +81,25 @@ class DataDialView extends WatchUi.WatchFace {
     private var _batteryMinute as Number = -1;
     //! Start of the day (epoch seconds) the date field was last read for.
     private var _lastDay as Number = -1;
-    //! True when a displayed value changed since the stats image was drawn.
-    private var _dirty as Boolean = true;
+    //! Hour seen on the previous update, to notice midnight passing.
+    private var _lastHour as Number = 0;
+    //! True when the whole stats image must be redrawn.
+    private var _dirtyAll as Boolean = true;
+    //! Bit per slot whose value changed since the stats image was drawn.
+    private var _dirtySlots as Number = 0;
+    //! Hour and minute hand angles (radians, clockwise from 12 o'clock) as
+    //! currently shown, and the step they were computed for.
+    private var _hourAngle as Float = 0.0;
+    private var _minuteAngle as Float = 0.0;
+    private var _handStep as Number = -1;
+    //! Width in pixels of each value as currently drawn in the stats image,
+    //! so the old text can be erased when a value changes.
+    private var _drawnWidth as Array<Number> = [0, 0, 0, 0, 0, 0, 0, 0] as Array<Number>;
 
     //! Off-screen image of the parts that never change (dots, divider lines,
     //! icons). Drawn once.
     private var _staticLayer as Graphics.BufferedBitmapReference?;
-    //! Off-screen image of the static layer plus the stat values. Redrawn
+    //! Off-screen image of the static layer plus the stat values. Updated
     //! only when a displayed value changes; copied to the screen every frame.
     private var _composite as Graphics.BufferedBitmapReference?;
 
@@ -131,17 +148,18 @@ class DataDialView extends WatchUi.WatchFace {
         }
 
         refreshValues(clockTime);
+        updateHands(clockTime);
         drawBackground(dc);
-
-        var hourAngle = ((clockTime.hour % 12) * 60 + clockTime.min) / 720.0 * Math.PI * 2;
-        var minuteAngle = (clockTime.min + clockTime.sec / 60.0) / 60.0 * Math.PI * 2;
-        drawHand(dc, hourAngle, _radius * 0.52, 12, 0.24);
-        drawHand(dc, minuteAngle, _radius * 0.86, 10, 0.30);
+        drawHands(dc);
 
         if (_awake) {
             var secondAngle = clockTime.sec / 60.0 * Math.PI * 2;
-            radialLine(dc, secondAngle, 0.0, 0.92, 2, COLOR_RED);
-            radialLine(dc, secondAngle + Math.PI, 0.0, 0.30, 2, COLOR_RED);
+            var tip = polar(secondAngle, _radius * 0.92);
+            var tail = polar(secondAngle + Math.PI, _radius * 0.30);
+            dc.setColor(COLOR_RED, Graphics.COLOR_TRANSPARENT);
+            dc.setPenWidth(2);
+            dc.drawLine(tail[0], tail[1], tip[0], tip[1]);
+            dc.setPenWidth(1);
         }
         drawCap(dc);
     }
@@ -168,7 +186,8 @@ class DataDialView extends WatchUi.WatchFace {
     //! - floors, calories, elevation, temperature: every wake-up, then every
     //!   SLOW_PERIOD seconds
     //! - battery: once a minute, or every update while charging
-    //! - date: when the day changes
+    //! - date: on wake-up and when midnight passes; redrawn only if the day
+    //!   changed
     //! While asleep the face is updated at most once a minute, and each of
     //! those updates re-reads everything.
     //! @param clockTime Current clock time
@@ -185,7 +204,7 @@ class DataDialView extends WatchUi.WatchFace {
         if (charging != _charging) {
             _charging = charging;
             _batteryMinute = -1;
-            _dirty = true;
+            _dirtySlots |= (1 << SLOT_BATTERY);
         }
 
         if (all || now - _stepsTime >= STEPS_PERIOD) {
@@ -208,12 +227,18 @@ class DataDialView extends WatchUi.WatchFace {
             setValue(SLOT_BATTERY, _batteryPercent.format("%d") + "%");
         }
 
-        var day = Time.today().value();
-        if (day != _lastDay) {
-            _lastDay = day;
-            _weekday = Metrics.weekday();
-            setValue(SLOT_DATE, Metrics.dayMonth());
-            _dirty = true;
+        // The day changes only at midnight: look at the date on wake-up (the
+        // watch may have slept through midnight) and when the hour wraps to 0.
+        var midnight = clockTime.hour < _lastHour;
+        _lastHour = clockTime.hour;
+        if (all || midnight) {
+            var day = Time.today().value();
+            if (day != _lastDay) {
+                _lastDay = day;
+                _weekday = Metrics.weekday();
+                setValue(SLOT_DATE, Metrics.dayMonth());
+                _dirtyAll = true;
+            }
         }
     }
 
@@ -228,7 +253,7 @@ class DataDialView extends WatchUi.WatchFace {
         }
         if (!_values[slot].equals(text)) {
             _values[slot] = text;
-            _dirty = true;
+            _dirtySlots |= (1 << slot);
         }
     }
 
@@ -236,8 +261,8 @@ class DataDialView extends WatchUi.WatchFace {
 
     //! Paint the dial and stats from cached images.
     //! The static layer (dots, divider lines, icons) is drawn once. The
-    //! composite (static layer plus stat values) is redrawn only when a
-    //! displayed value changed, and is copied to the screen every frame.
+    //! composite (static layer plus stat values) is copied to the screen
+    //! every frame; when a value changes only that value's area is redrawn.
     //! If an image cannot be allocated, the missing part is drawn directly.
     //! @param dc Device context
     private function drawBackground(dc as Dc) as Void {
@@ -251,7 +276,7 @@ class DataDialView extends WatchUi.WatchFace {
                 drawDial(layerDc);
                 drawFields(layerDc, true);
             }
-            _dirty = true;
+            _dirtyAll = true;
         }
         if (layer == null) {
             clearScreen(dc);
@@ -265,7 +290,7 @@ class DataDialView extends WatchUi.WatchFace {
         if (composite == null) {
             _composite = createLayer(dc);
             composite = (_composite != null) ? _composite.get() as BufferedBitmap? : null;
-            _dirty = true;
+            _dirtyAll = true;
         }
         if (composite == null) {
             dc.drawBitmap(0, 0, layer);
@@ -273,17 +298,68 @@ class DataDialView extends WatchUi.WatchFace {
             return;
         }
 
-        if (_dirty) {
+        if (_dirtyAll || _dirtySlots != 0) {
             var compositeDc = composite.getDc();
             if (compositeDc has :setAntiAlias) {
                 compositeDc.setAntiAlias(true);
             }
-            compositeDc.drawBitmap(0, 0, layer);
-            drawFields(compositeDc, false);
-            _dirty = false;
+            if (_dirtyAll) {
+                compositeDc.drawBitmap(0, 0, layer);
+                drawFields(compositeDc, false);
+                for (var i = 0; i < SLOT_COUNT; i++) {
+                    _drawnWidth[i] = compositeDc.getTextWidthInPixels(_values[i], _valueFont);
+                }
+            } else {
+                for (var i = 0; i < SLOT_COUNT; i++) {
+                    if ((_dirtySlots & (1 << i)) != 0) {
+                        redrawSlot(compositeDc, layer, i);
+                    }
+                }
+            }
+            _dirtyAll = false;
+            _dirtySlots = 0;
         }
-        dc.drawBitmap(0, 0, composite);
+
+        // The composite covers the whole screen, so copy it without blending.
+        if (dc has :setBlendMode) {
+            dc.setBlendMode(Graphics.BLEND_MODE_NO_BLEND);
+            dc.drawBitmap(0, 0, composite);
+            dc.setBlendMode(Graphics.BLEND_MODE_DEFAULT);
+        } else {
+            dc.drawBitmap(0, 0, composite);
+        }
     }
+
+    //! Redraw one stat in the composite: restore the static layer under the
+    //! value text (and under the battery gauge for the battery slot), then
+    //! draw the stat's live parts again. Clipping limits the work to those
+    //! small areas.
+    //! @param dc Device context of the composite image
+    //! @param layer The static layer
+    //! @param slot Field slot to redraw
+    private function redrawSlot(dc as Dc, layer as BufferedBitmap, slot as Number) as Void {
+        var angle = slot / SLOT_COUNT.toFloat() * Math.PI * 2;
+        var outer = polar(angle, _radius * 0.68);
+        var width = dc.getTextWidthInPixels(_values[slot], _valueFont);
+        var clearWidth = ((width > _drawnWidth[slot]) ? width : _drawnWidth[slot]) + 8;
+        var clearHeight = dc.getFontHeight(_valueFont) + 6;
+        _drawnWidth[slot] = width;
+
+        dc.setClip(outer[0] - clearWidth / 2, outer[1] - clearHeight / 2, clearWidth, clearHeight);
+        dc.drawBitmap(0, 0, layer);
+        drawFieldLive(dc, slot);
+
+        if (slot == SLOT_BATTERY) {
+            // The gauge and charging bolt change with the value.
+            var inner = polar(angle, _radius * 0.38);
+            var half = (_iconSize * 0.6).toNumber() + 3;
+            dc.setClip(inner[0] - half, inner[1] - half, 2 * half, 2 * half);
+            dc.drawBitmap(0, 0, layer);
+            drawFieldLive(dc, slot);
+        }
+        dc.clearClip();
+    }
+
 
     //! Dial: a dot for every minute, larger at the hours and largest at the
     //! quarters.
@@ -305,40 +381,58 @@ class DataDialView extends WatchUi.WatchFace {
     //!        and icons); false to draw the live parts (values, weekday,
     //!        battery gauge)
     private function drawFields(dc as Dc, fixed as Boolean) as Void {
-        var center = Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER;
-
         for (var i = 0; i < SLOT_COUNT; i++) {
-            var angle = i / SLOT_COUNT.toFloat() * Math.PI * 2;
-            var inner = polar(angle, _radius * 0.38);
-
             if (fixed) {
-                radialLine(dc, angle + Math.PI / SLOT_COUNT, 0.30, 0.86, 2, COLOR_ACCENT);
-                var icon = _icons[i];
-                if (icon != null) {
-                    dc.drawBitmap(inner[0] - _iconSize / 2, inner[1] - _iconSize / 2, icon);
-                }
-                continue;
+                drawFieldFixed(dc, i);
+            } else {
+                drawFieldLive(dc, i);
             }
-
-            if (i == SLOT_BATTERY) {
-                drawBattery(dc, inner[0], inner[1] - _iconSize / 2, _iconSize, _batteryPercent,
-                        (_batteryPercent < BATTERY_LOW) ? COLOR_RED : COLOR_ACCENT);
-                if (_charging) {
-                    drawBolt(dc, inner[0], inner[1], _iconSize);
-                }
-            } else if (i == SLOT_DATE) {
-                // The weekday sits directly under the date instead of at the icon radius.
-                var day = polar(angle, _radius * 0.525);
-                dc.setColor(COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-                dc.drawText(day[0], day[1], _labelFont, _weekday, center);
-            }
-
-            var outer = polar(angle, _radius * 0.68);
-            var low = (i == SLOT_BATTERY) && (_batteryPercent < BATTERY_LOW);
-            dc.setColor(low ? COLOR_RED : COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(outer[0], outer[1], _valueFont, _values[i], center);
         }
     }
+
+    //! Draw the parts of one field that never change: its divider line and
+    //! bitmap icon.
+    //! @param dc Device context
+    //! @param slot Field slot
+    private function drawFieldFixed(dc as Dc, slot as Number) as Void {
+        var angle = slot / SLOT_COUNT.toFloat() * Math.PI * 2;
+        radialLine(dc, angle + Math.PI / SLOT_COUNT, 0.30, 0.86, 2, COLOR_ACCENT);
+        var icon = _icons[slot];
+        if (icon != null) {
+            var inner = polar(angle, _radius * 0.38);
+            dc.drawBitmap(inner[0] - _iconSize / 2, inner[1] - _iconSize / 2, icon);
+        }
+    }
+
+    //! Draw the live parts of one field: its value, plus the battery gauge
+    //! or the weekday for those slots.
+    //! @param dc Device context
+    //! @param slot Field slot
+    private function drawFieldLive(dc as Dc, slot as Number) as Void {
+        var center = Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER;
+        var angle = slot / SLOT_COUNT.toFloat() * Math.PI * 2;
+        var low = false;
+
+        if (slot == SLOT_BATTERY) {
+            var inner = polar(angle, _radius * 0.38);
+            low = _batteryPercent < BATTERY_LOW;
+            drawBattery(dc, inner[0], inner[1] - _iconSize / 2, _iconSize, _batteryPercent,
+                    low ? COLOR_RED : COLOR_ACCENT);
+            if (_charging) {
+                drawBolt(dc, inner[0], inner[1], _iconSize);
+            }
+        } else if (slot == SLOT_DATE) {
+            // The weekday sits directly under the date instead of at the icon radius.
+            var day = polar(angle, _radius * 0.525);
+            dc.setColor(COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(day[0], day[1], _labelFont, _weekday, center);
+        }
+
+        var outer = polar(angle, _radius * 0.68);
+        dc.setColor(low ? COLOR_RED : COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(outer[0], outer[1], _valueFont, _values[slot], center);
+    }
+
 
     //! Draw a horizontal battery gauge filled to the charge level.
     //! @param dc Device context
@@ -394,6 +488,32 @@ class DataDialView extends WatchUi.WatchFace {
 
     // --------------------------------------------------------------- hands
 
+    //! Move the hour and minute hands in steps: the minute hand every
+    //! MINUTE_HAND_STEP seconds and the hour hand every HOUR_HAND_STEP
+    //! minutes. The hands are drawn straight to the screen each frame:
+    //! profiling showed that drawing them into the cached image costs more
+    //! than it saves.
+    //! @param clockTime Current clock time
+    private function updateHands(clockTime as System.ClockTime) as Void {
+        var seconds = clockTime.sec - clockTime.sec % MINUTE_HAND_STEP;
+        var step = (clockTime.hour * 60 + clockTime.min) * 60 + seconds;
+        if (step == _handStep) {
+            return;
+        }
+        _handStep = step;
+
+        var hourMinutes = clockTime.min - clockTime.min % HOUR_HAND_STEP;
+        _hourAngle = ((clockTime.hour % 12) * 60 + hourMinutes) / 720.0 * Math.PI * 2;
+        _minuteAngle = (clockTime.min + seconds / 60.0) / 60.0 * Math.PI * 2;
+    }
+
+    //! Draw the hour and minute hands at their current stepped angles.
+    //! @param dc Device context
+    private function drawHands(dc as Dc) as Void {
+        drawHand(dc, _hourAngle, _radius * 0.52, 12, 0.24);
+        drawHand(dc, _minuteAngle, _radius * 0.86, 10, 0.30);
+    }
+
     //! Skeleton hand: a rounded hollow bar on a thin stem, so the fields
     //! show through the middle of the hand.
     //! @param dc Device context
@@ -407,7 +527,9 @@ class DataDialView extends WatchUi.WatchFace {
         var a = polar(angle, inner);
         var b = polar(angle, length - width / 2);
 
-        roundLine(dc, [_cx, _cy], a, 2, COLOR_WHITE);
+        dc.setColor(COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.setPenWidth(2);
+        dc.drawLine(_cx, _cy, a[0], a[1]);
         roundLine(dc, a, b, width + 4, COLOR_BG);
         roundLine(dc, a, b, width, COLOR_WHITE);
         roundLine(dc, polar(angle, inner + width * 0.6), polar(angle, length - width * 1.4), width - 5, COLOR_BG);

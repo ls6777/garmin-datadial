@@ -27,6 +27,16 @@ class DataDialView extends WatchUi.WatchFace {
     private const COLOR_CHARGING = 0x3DDC57;
     //! Value colour once a stat's daily goal is met.
     private const COLOR_GOAL = 0x3DDC57;
+    //! Temperature value and symbol colour when it is cold.
+    private const COLOR_COLD = 0x4FC3F7;
+    //! Below this temperature (40 °F, in Celsius) the cold styling shows.
+    private const COLD_BELOW_C = 4.44;
+    //! Above this temperature (90 °F, in Celsius) the hot styling shows.
+    private const HOT_ABOVE_C = 32.22;
+    //! Temperature states.
+    private const TEMP_NORMAL = 0;
+    private const TEMP_COLD = 1;
+    private const TEMP_HOT = 2;
     //! Unfilled part of a goal gauge.
     private const COLOR_GAUGE_TRACK = 0x333333;
 
@@ -119,6 +129,9 @@ class DataDialView extends WatchUi.WatchFace {
     private var _charging as Boolean = false;
     //! Bit per slot whose daily goal has been met (steps and floors).
     private var _goalsMet as Number = 0;
+    //! TEMP_COLD below COLD_BELOW_C, TEMP_HOT above HOT_ABOVE_C, otherwise
+    //! TEMP_NORMAL.
+    private var _tempState as Number = TEMP_NORMAL;
     //! Goal progress per slot in whole percent, or -1 for no gauge.
     private var _progress as Array<Number> = [-1, -1, -1, -1, -1, -1, -1, -1] as Array<Number>;
 
@@ -191,6 +204,12 @@ class DataDialView extends WatchUi.WatchFace {
     //! @param dc Device context
     public function onUpdate(dc as Dc) as Void {
         var clockTime = System.getClockTime();
+        var fixedTime = TestValues.clockTime();
+        if (fixedTime != null) {
+            clockTime.hour = fixedTime[0];
+            clockTime.min = fixedTime[1];
+            clockTime.sec = fixedTime[2];
+        }
 
         if (dc has :setAntiAlias) {
             dc.setAntiAlias(true);
@@ -278,6 +297,21 @@ class DataDialView extends WatchUi.WatchFace {
             setValue(SLOT_CALORIES, Metrics.calories());
             setValue(SLOT_ELEVATION, Metrics.elevation());
             setValue(SLOT_TEMPERATURE, Metrics.temperature());
+            var celsius = Metrics.temperatureCelsius();
+            var state = TEMP_NORMAL;
+            if (celsius != null && celsius < COLD_BELOW_C) {
+                state = TEMP_COLD;
+            } else if (celsius != null && celsius > HOT_ABOVE_C) {
+                state = TEMP_HOT;
+            }
+            var fixedState = TestValues.temperatureState();
+            if (fixedState != null) {
+                state = fixedState;
+            }
+            if (state != _tempState) {
+                _tempState = state;
+                _dirtySlots |= (1 << SLOT_TEMPERATURE);
+            }
         }
 
         if (_charging || clockTime.min != _batteryMinute) {
@@ -470,6 +504,13 @@ class DataDialView extends WatchUi.WatchFace {
             dc.drawBitmap(0, 0, layer);
             drawFieldLive(dc, slot);
         }
+        if (slot == SLOT_TEMPERATURE) {
+            var flake = tempSymbolPosition();
+            var half = tempSymbolRadius() + 4;
+            dc.setClip(flake[0] - half, flake[1] - half, 2 * half, 2 * half);
+            dc.drawBitmap(0, 0, layer);
+            drawFieldLive(dc, slot);
+        }
         if (_progress[slot] >= 0) {
             var box = gaugeBounds(slot);
             dc.setClip(box[0], box[1], box[2] - box[0], box[3] - box[1]);
@@ -551,6 +592,14 @@ class DataDialView extends WatchUi.WatchFace {
         }
 
         drawGauge(dc, slot);
+        if (slot == SLOT_TEMPERATURE && _tempState != TEMP_NORMAL) {
+            var symbol = tempSymbolPosition();
+            if (_tempState == TEMP_COLD) {
+                drawSnowflake(dc, symbol[0], symbol[1]);
+            } else {
+                drawHeat(dc, symbol[0], symbol[1]);
+            }
+        }
 
         var outer = valuePosition(slot);
         var valueY = outer[1];
@@ -567,6 +616,11 @@ class DataDialView extends WatchUi.WatchFace {
         }
 
         var color = low ? COLOR_RED : (((_goalsMet & (1 << slot)) != 0) ? COLOR_GOAL : COLOR_WHITE);
+        if (slot == SLOT_TEMPERATURE && _tempState == TEMP_COLD) {
+            color = COLOR_COLD;
+        } else if (slot == SLOT_TEMPERATURE && _tempState == TEMP_HOT) {
+            color = COLOR_RED;
+        }
         dc.setColor(color, Graphics.COLOR_TRANSPARENT);
         dc.drawText(outer[0], valueY, valueFont(slot), _values[slot], center);
     }
@@ -645,6 +699,75 @@ class DataDialView extends WatchUi.WatchFace {
                     : ((percent >= GAUGE_YELLOW_FROM) ? GAUGE_YELLOW : GAUGE_RED);
             dc.setColor(color, Graphics.COLOR_TRANSPARENT);
             dc.drawArc(_cx, _cy, radius, direction, start, start + (finish - start) * progress);
+        }
+        dc.setPenWidth(1);
+    }
+
+    //! Radius of the temperature symbol (snowflake or heat waves).
+    //! @return Radius in pixels
+    private function tempSymbolRadius() as Number {
+        return (_radius * 0.05).toNumber();
+    }
+
+    //! Center of the temperature symbol: just above the temperature value.
+    //! @return [x, y]
+    private function tempSymbolPosition() as [Number, Number] {
+        var value = valuePosition(SLOT_TEMPERATURE);
+        var halfHeight = (Graphics.getFontHeight(valueFont(SLOT_TEMPERATURE)) * 0.36).toNumber();
+        return [value[0], value[1] - halfHeight - tempSymbolRadius() - 4];
+    }
+
+    //! Draw a snowflake: six arms, each with a small V near its tip.
+    //! @param dc Device context
+    //! @param x Center x
+    //! @param y Center y
+    private function drawSnowflake(dc as Dc, x as Number, y as Number) as Void {
+        var r = tempSymbolRadius();
+        var branch = r * 0.4;
+        dc.setColor(COLOR_COLD, Graphics.COLOR_TRANSPARENT);
+        dc.setPenWidth(2);
+        for (var k = 0; k < 6; k++) {
+            var a = k * Math.PI / 3;
+            var sin = Math.sin(a);
+            var cos = Math.cos(a);
+            dc.drawLine(x, y, x + r * sin, y - r * cos);
+            // V on the arm, 60% of the way out.
+            var bx = x + r * 0.6 * sin;
+            var by = y - r * 0.6 * cos;
+            for (var side = -1; side <= 1; side += 2) {
+                var b = a + side * Math.PI / 4;
+                dc.drawLine(bx, by, bx + branch * Math.sin(b), by - branch * Math.cos(b));
+            }
+        }
+        dc.setPenWidth(1);
+    }
+
+    //! Draw rising heat waves: three wavy vertical lines, in red.
+    //! @param dc Device context
+    //! @param x Center x
+    //! @param y Center y
+    private function drawHeat(dc as Dc, x as Number, y as Number) as Void {
+        var r = tempSymbolRadius();
+        var amplitude = r * 0.18;
+        var steps = 12;
+        dc.setColor(COLOR_RED, Graphics.COLOR_TRANSPARENT);
+        dc.setPenWidth(2);
+        for (var w = -1; w <= 1; w++) {
+            var x0 = x + w * r * 0.6;
+            // One and a half waves from bottom to top; the middle line is
+            // taller, like rising heat.
+            var top = y - r * ((w == 0) ? 1.0 : 0.8);
+            var bottom = y + r * ((w == 0) ? 1.0 : 0.8);
+            var prevX = x0;
+            var prevY = bottom;
+            for (var k = 1; k <= steps; k++) {
+                var t = k / steps.toFloat();
+                var px = x0 + amplitude * Math.sin(t * 3 * Math.PI);
+                var py = bottom + (top - bottom) * t;
+                dc.drawLine(prevX, prevY, px, py);
+                prevX = px;
+                prevY = py;
+            }
         }
         dc.setPenWidth(1);
     }

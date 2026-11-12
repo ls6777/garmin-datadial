@@ -44,6 +44,18 @@ class TestValues {
     public static function progress(slot as Number) as Float? {
         return null;
     }
+
+    //! Temperature state that replaces the real one.
+    //! @return Always null: use the real temperature
+    public static function temperatureState() as Number? {
+        return null;
+    }
+
+    //! Clock time that replaces the real one.
+    //! @return Always null: use the real time
+    public static function clockTime() as [Number, Number, Number]? {
+        return null;
+    }
 }
 
 //! Test build: fixed values chosen to stress the layout.
@@ -93,5 +105,18 @@ class TestValues {
     //! @return Progress, 0..1
     public static function progress(slot as Number) as Float? {
         return (slot == 3) ? 0.6 : 1.0;
+    }
+
+    //! Temperature state that replaces the real one: hot, to match 110°.
+    //! @return 2 (hot; see DataDialView TEMP_ constants)
+    public static function temperatureState() as Number? {
+        return 2;
+    }
+
+    //! Clock time that replaces the real one: 12:41:26, which puts all
+    //! three hands along divider lines so no stat is covered.
+    //! @return [hour, minute, second]
+    public static function clockTime() as [Number, Number, Number]? {
+        return [12, 41, 26];
     }
 }

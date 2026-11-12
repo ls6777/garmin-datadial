@@ -191,13 +191,7 @@ class Metrics {
     //! watch's own sensor, so it reads high while worn (body heat).
     //! @return Temperature string
     public static function temperature() as String {
-        if (!((Toybox has :SensorHistory) && (SensorHistory has :getTemperatureHistory))) {
-            return NO_VALUE;
-        }
-        var celsius = newestSample(SensorHistory.getTemperatureHistory({
-            :period => 1,
-            :order => SensorHistory.ORDER_NEWEST_FIRST
-        }));
+        var celsius = temperatureCelsius();
         if (celsius == null) {
             return NO_VALUE;
         }
@@ -206,6 +200,18 @@ class Metrics {
             return (celsius * 9.0 / 5.0 + 32.0).format("%d") + "°";
         }
         return celsius.format("%d") + "°";
+    }
+
+    //! Sensor temperature in degrees Celsius.
+    //! @return The newest reading, or null if unavailable
+    public static function temperatureCelsius() as Numeric? {
+        if (!((Toybox has :SensorHistory) && (SensorHistory has :getTemperatureHistory))) {
+            return null;
+        }
+        return newestSample(SensorHistory.getTemperatureHistory({
+            :period => 1,
+            :order => SensorHistory.ORDER_NEWEST_FIRST
+        }));
     }
 
     //! Return the data value of the first sample of a sensor history iterator.

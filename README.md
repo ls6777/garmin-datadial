@@ -4,7 +4,7 @@ Analog Connect IQ watch face for the Garmin fēnix 9 Pro 51mm (466×466 AMOLED).
 
 ![DataDial in the Connect IQ simulator](docs/screenshot.png)
 
-*Simulator screenshot of the test build (`./build.sh test`), which shows fixed worst-case values to check the layout: 25,000 steps, 110 floors, 3,500 calories, heart rate 160, 13,000 ft, 110°, 100% battery with 31 days left.*
+*Simulator screenshot of the test build (`./build.sh test`), which shows fixed worst-case values to check the layout: 25,000 steps (60% of goal), 110 floors (goal met), 3,500 calories, heart rate 160, 13,000 ft, 110° (hot), 100% battery with 31 days left. Its clock is fixed at 12:41:26 so the hands lie along the divider lines.*
 
 ## The face
 
@@ -14,7 +14,8 @@ Analog Connect IQ watch face for the Garmin fēnix 9 Pro 51mm (466×466 AMOLED).
   seconds hand while the watch is awake. The minute hand moves every 10 seconds and the
   hour hand every 10 minutes.
 - **Stats:** eight sections divided by blue lines, each with a blue icon toward the
-  center and a white value toward the edge. Clockwise from 12:
+  center and a white value toward the edge. Short values (heart rate, floors, temperature,
+  calories) use larger text. Clockwise from 12:
 
 | Section | Shows | Read |
 |---|---|---|
@@ -32,6 +33,13 @@ shows as `--`. Elevation and temperature follow the watch's unit settings (ft/m,
 
 - **Battery:** the icon fills to the charge level. Below 20% the icon and percentage turn
   red. While charging, a green lightning bolt appears over the icon.
+- **Goals (steps and floors):** each has a curved gauge along the outer edge of its cell,
+  filling from its lower end upward (steps left to right, floors right to left) toward the
+  daily goal set on the watch. The fill is red below 30% of the goal, yellow below 90%, and
+  green from 90%. Once the goal is met, the value turns green too. With no goal set, there
+  is no gauge. Calories has no goal, since the watch doesn't expose one to watch faces.
+- **Temperature:** below 40 °F (4.4 °C) the value turns ice blue with a snowflake above it;
+  above 90 °F (32.2 °C) it turns red with rising heat waves above it.
 - **Always-on mode:** if always-on display is enabled, the sleeping watch shows the dot
   dial and the hour and minute hands in dim gray, with no stats or seconds hand. Everything
   shifts by up to 2 px each minute to prevent burn-in. The simulator's 24-hour burn-in check
@@ -43,13 +51,14 @@ need to be added to `manifest.xml`.
 ## Power
 
 - The dots, divider lines and icons are drawn once, into an off-screen image.
-- The stat values are drawn into a second image, and only the stat whose value changed is
-  redrawn.
+- The stat values and goal gauges are drawn into a second image, and only the stat whose
+  value changed is redrawn.
 - Each frame copies that image to the screen and draws the hands on top.
 
-In the simulator this takes about 31 ms per frame while awake, against 45 ms for the
-first, much simpler version of the face. Those are PC timings, useful for comparing
-versions, not as watch timings.
+Before the goal gauges and temperature symbols were added, this took about 31 ms per
+frame in the simulator while awake, against 45 ms for the first, much simpler version of
+the face. The new parts are only redrawn when their values change, but they haven't been
+profiled. All of these are PC timings, useful for comparing versions, not as watch timings.
 
 ## Files
 
@@ -59,7 +68,7 @@ versions, not as watch timings.
 | `source/DataDialApp.mc` | Application entry point |
 | `source/DataDialView.mc` | Drawing, refresh schedule, cached images, always-on view |
 | `source/Metrics.mc` | Reads and formats each value |
-| `source/TestValues.mc` | Fixed values for the test build; does nothing in the normal build |
+| `source/TestValues.mc` | Fixed values and clock time for the test build; does nothing in the normal build |
 | `resources/drawables/` | Stat icons (SVG, stored as PNG for smooth edges) |
 | `monkey.jungle` | Normal build |
 | `monkey.test.jungle` | Test build with fixed values |
@@ -71,7 +80,7 @@ Requires Connect IQ SDK 9.3.0 and the developer key at `../developer_key`.
 ```sh
 ./build.sh          # build bin/DataDial.prg
 ./build.sh run      # build, start the simulator, load the face
-./build.sh test     # test build with fixed worst-case values, in the simulator
+./build.sh test     # test build with fixed worst-case values and time, in the simulator
 ```
 
 The test build goes to `bin/DataDial-test.prg`. Don't copy that one to the watch.
@@ -87,7 +96,8 @@ The test build goes to `bin/DataDial-test.prg`. Don't copy that one to the watch
 
 ## Notes
 
-- Temperature comes from the watch's own sensor, so it reads high while worn.
+- Temperature comes from the watch's own sensor, so it reads high while worn. The cold and
+  hot thresholds apply to that reading, not to the weather.
 - Heart rate is the live reading when available, otherwise the latest history sample.
 - The battery estimate is the same number the watch shows under Power Manager → Battery
   Estimates.

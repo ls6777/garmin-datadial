@@ -1,5 +1,7 @@
 # DataDial
 
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/ls6777)
+
 Analog Connect IQ watch face for the Garmin fēnix 9 Pro 51mm (466×466 AMOLED).
 
 ![DataDial in the Connect IQ simulator](docs/screenshot.png)

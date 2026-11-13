@@ -13,8 +13,9 @@ Analog Connect IQ watch face for the Garmin fēnix 9 Pro 51mm (466×466 AMOLED).
 - **Hands:** hollow hour and minute hands on thin stems, an open center hub, and a red
   seconds hand while the watch is awake. The minute hand moves every 10 seconds and the
   hour hand every 10 minutes.
-- **Stats:** eight sections divided by blue lines, each with a blue icon toward the
-  center and a white value toward the edge. Short values (heart rate, floors, temperature,
+- **Stats:** eight sections divided by colored lines (blue by default), each with an icon
+  in the same color toward the center and a white value toward the edge. The heart rate
+  icon has its own color (red by default). Short values (heart rate, floors, temperature,
   calories) use larger text. Clockwise from 12:
 
 | Section | Shows | Read |
@@ -45,6 +46,25 @@ shows as `--`. Elevation and temperature follow the watch's unit settings (ft/m,
   shifts by up to 2 px each minute to prevent burn-in. The simulator's 24-hour burn-in check
   reports no burn-in, at about 1% luminance.
 
+## Settings
+
+In the Connect IQ or Garmin Connect phone app, under DataDial's settings:
+
+| Setting | Colors | Default |
+|---|---|---|
+| Lines and icons color | Divider lines, stat icons and the battery outline | Blue |
+| Heart rate icon color | Heart icon only | Red |
+
+Each offers Blue, Cyan, Green, Yellow, Orange, Red, Pink, Purple, White and Gray. The
+icons are stored white and tinted as they're drawn. Warning colors stay fixed: low battery
+red, charging green, the goal colors, and the cold and hot temperature colors.
+
+Phone settings only reach a copy installed from the Connect IQ Store (or uploaded there as
+a beta app). A `.prg` copied over USB always uses the defaults. In the simulator, change
+them with File → Edit Persistent Storage → Edit Application.Properties data (Ctrl+P), then
+Save. `./build.sh run` and `./build.sh test` send the settings file the simulator needs
+for that window; without it, the window says the app has no settings.
+
 All sizes and positions are relative to the screen radius, so other round displays only
 need to be added to `manifest.xml`.
 
@@ -69,7 +89,9 @@ profiled. All of these are PC timings, useful for comparing versions, not as wat
 | `source/DataDialView.mc` | Drawing, refresh schedule, cached images, always-on view |
 | `source/Metrics.mc` | Reads and formats each value |
 | `source/TestValues.mc` | Fixed values and clock time for the test build; does nothing in the normal build |
-| `resources/drawables/` | Stat icons (SVG, stored as PNG for smooth edges) |
+| `resources/drawables/` | Stat icons (white SVG masks, stored as PNG for smooth edges) |
+| `resources/settings/` | Color settings: properties and the phone-app settings page |
+| `tools/PushSettings.java` | Sends the settings file to the simulator (used by `build.sh`) |
 | `monkey.jungle` | Normal build |
 | `monkey.test.jungle` | Test build with fixed values |
 

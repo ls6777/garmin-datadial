@@ -8,6 +8,9 @@ import Toybox.WatchUi;
 //! Watch face application. Creates the single DataDialView.
 class DataDialApp extends Application.AppBase {
 
+    //! The face, kept so settings changes can be passed to it.
+    private var _view as DataDialView?;
+
     //! Constructor.
     public function initialize() {
         AppBase.initialize();
@@ -26,6 +29,16 @@ class DataDialApp extends Application.AppBase {
     //! Return the initial view of the watch face.
     //! @return Array holding the watch face view
     public function getInitialView() as [Views] or [Views, InputDelegates] {
-        return [new DataDialView()];
+        _view = new DataDialView();
+        return [_view as DataDialView];
+    }
+
+    //! Called when the user changes settings in the phone app while the
+    //! face is running: apply them and redraw.
+    public function onSettingsChanged() as Void {
+        if (_view != null) {
+            _view.loadSettings();
+        }
+        WatchUi.requestUpdate();
     }
 }

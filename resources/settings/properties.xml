@@ -1,0 +1,8 @@
+<!-- User settings. Colors are 0xRRGGBB stored as decimal numbers; the
+     choices are listed in settings.xml. -->
+<properties>
+    <!-- Divider lines, stat icons and battery outline. Default blue 0x2EA3F2. -->
+    <property id="AccentColor" type="number">3056626</property>
+    <!-- Heart rate icon. Default red 0xFF5A5A. -->
+    <property id="HeartColor" type="number">16734810</property>
+</properties>

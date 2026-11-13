@@ -43,5 +43,12 @@ if [[ "${1:-}" == "run" || "${1:-}" == "test" ]]; then
         "$SDK/bin/simulator.exe" &
         sleep 5
     fi
+    # Send the settings file too, as VS Code does, so the simulator's
+    # Edit Application.Properties data window can show the settings.
+    NAME="$(basename "$OUT" .prg)"
+    SETTINGS="bin/$NAME-settings.json"
+    if [[ -f "$SETTINGS" ]]; then
+        MSYS_NO_PATHCONV=1 java -cp "$SDK/bin/monkeybrains.jar" tools/PushSettings.java             "$SDK/bin/shell.exe" "$SETTINGS" "${NAME^^}-settings.json"
+    fi
     "$SDK/bin/monkeydo.bat" "$OUT" "$DEVICE"
 fi

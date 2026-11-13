@@ -8,6 +8,7 @@
 //! are drawn once, and the stat values are redrawn only when one changes.
 //! Each frame copies the cached image and draws the hands on top.
 
+import Toybox.Application;
 import Toybox.Graphics;
 import Toybox.Lang;
 import Toybox.Math;
@@ -23,7 +24,9 @@ class DataDialView extends WatchUi.WatchFace {
     private const COLOR_WHITE = 0xFFFFFF;
     private const COLOR_RED = 0xFF3B30;
     private const COLOR_MINUTE_DOT = 0xB0B0B0;
-    private const COLOR_ACCENT = 0x2EA3F2;
+    //! Defaults for the user color settings (see resources/settings).
+    private const DEFAULT_ACCENT = 0x2EA3F2;
+    private const DEFAULT_HEART = 0xFF5A5A;
     private const COLOR_CHARGING = 0x3DDC57;
     //! Value colour once a stat's daily goal is met.
     private const COLOR_GOAL = 0x3DDC57;
@@ -114,6 +117,11 @@ class DataDialView extends WatchUi.WatchFace {
     private var _ink as Number = COLOR_WHITE;
     private var _inkMinor as Number = COLOR_MINUTE_DOT;
 
+    //! User color settings: divider lines, stat icons and battery outline,
+    //! and the heart rate icon.
+    private var _accentColor as Number = DEFAULT_ACCENT;
+    private var _heartColor as Number = DEFAULT_HEART;
+
     private var _awake as Boolean = true;
     private var _burnInProtection as Boolean = false;
 
@@ -175,6 +183,25 @@ class DataDialView extends WatchUi.WatchFace {
         for (var i = 0; i < SLOT_COUNT; i++) {
             _values[i] = Metrics.NO_VALUE;
         }
+        loadSettings();
+    }
+
+    //! Read the user settings and redraw the cached images with them.
+    //! Called at startup and when the settings change on the phone.
+    public function loadSettings() as Void {
+        _accentColor = colorSetting("AccentColor", DEFAULT_ACCENT);
+        _heartColor = colorSetting("HeartColor", DEFAULT_HEART);
+        _staticLayer = null;
+        _dirtyAll = true;
+    }
+
+    //! Read a color setting.
+    //! @param key Property id
+    //! @param fallback Color to use if the property is missing or invalid
+    //! @return Color as 0xRRGGBB
+    private function colorSetting(key as String, fallback as Number) as Number {
+        var value = Properties.getValue(key);
+        return (value instanceof Number) ? value : fallback;
     }
 
     //! Compute layout and load fonts and icons.
@@ -559,11 +586,20 @@ class DataDialView extends WatchUi.WatchFace {
     //! @param slot Field slot
     private function drawFieldFixed(dc as Dc, slot as Number) as Void {
         var angle = slot / SLOT_COUNT.toFloat() * Math.PI * 2;
-        radialLine(dc, angle + Math.PI / SLOT_COUNT, 0.30, 0.86, 2, COLOR_ACCENT);
+        radialLine(dc, angle + Math.PI / SLOT_COUNT, 0.30, 0.86, 2, _accentColor);
         var icon = _icons[slot];
         if (icon != null) {
+            // The icons are white masks, tinted to the user's color.
             var inner = polar(angle, _radius * 0.38);
-            dc.drawBitmap(inner[0] - _iconSize / 2, inner[1] - _iconSize / 2, icon);
+            var x = inner[0] - _iconSize / 2;
+            var y = inner[1] - _iconSize / 2;
+            if (dc has :drawBitmap2) {
+                dc.drawBitmap2(x, y, icon, {
+                    :tintColor => (slot == SLOT_HEART) ? _heartColor : _accentColor
+                });
+            } else {
+                dc.drawBitmap(x, y, icon);
+            }
         }
     }
 
@@ -580,7 +616,7 @@ class DataDialView extends WatchUi.WatchFace {
             var inner = polar(angle, _radius * 0.38);
             low = _batteryPercent < BATTERY_LOW;
             drawBattery(dc, inner[0], inner[1] - _iconSize / 2, _iconSize, _batteryPercent,
-                    low ? COLOR_RED : COLOR_ACCENT);
+                    low ? COLOR_RED : _accentColor);
             if (_charging) {
                 drawBolt(dc, inner[0], inner[1], _iconSize);
             }

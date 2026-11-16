@@ -80,6 +80,11 @@ class DataDialView extends WatchUi.WatchFace {
     private const MINUTE_HAND_STEP = 10;
     private const HOUR_HAND_STEP = 10;
 
+    //! Cosines and sines of 0, 22.5, 45, 67.5 and 90 degrees: the points
+    //! of each quarter circle in the rounded ends of the hand outlines.
+    private const ARC_COS = [1.0, 0.9239, 0.7071, 0.3827, 0.0] as Array<Float>;
+    private const ARC_SIN = [0.0, 0.3827, 0.7071, 0.9239, 1.0] as Array<Float>;
+
     //! Seconds between re-reads while awake. Everything is also re-read on
     //! every wake-up. Heart rate is read every update, battery once a
     //! minute, and the date when the day changes.
@@ -164,6 +169,12 @@ class DataDialView extends WatchUi.WatchFace {
     private var _hourAngle as Float = 0.0;
     private var _minuteAngle as Float = 0.0;
     private var _handStep as Number = -1;
+    //! Cached hand outline polygons, and the hand step and center they
+    //! were built for (see drawHands).
+    private var _handShapes as Array<Array<Array<Point2D> > >?;
+    private var _shapeStep as Number = -1;
+    private var _shapeCx as Number = 0;
+    private var _shapeCy as Number = 0;
     //! Width in pixels of each value as currently drawn in the stats image,
     //! so the old text can be erased when a value changes.
     private var _drawnWidth as Array<Number> = [0, 0, 0, 0, 0, 0, 0, 0] as Array<Number>;
@@ -908,32 +919,102 @@ class DataDialView extends WatchUi.WatchFace {
         _minuteAngle = (clockTime.min + seconds / 60.0) / 60.0 * Math.PI * 2;
     }
 
-    //! Draw the hour and minute hands at their current stepped angles.
+    //! Draw the hour and minute hands at their current stepped angles. The
+    //! outline shapes are rebuilt only when a hand moves or the center
+    //! shifts (always-on burn-in shift).
     //! @param dc Device context
     private function drawHands(dc as Dc) as Void {
-        drawHand(dc, _hourAngle, _radius * 0.52, 12, 0.24);
-        drawHand(dc, _minuteAngle, _radius * 0.86, 10, 0.30);
+        if (_handShapes == null || _shapeStep != _handStep || _shapeCx != _cx || _shapeCy != _cy) {
+            _handShapes = [
+                handShapes(_hourAngle, _radius * 0.52, 12, 0.24),
+                handShapes(_minuteAngle, _radius * 0.86, 10, 0.30)
+            ] as Array<Array<Array<Point2D> > >;
+            _shapeStep = _handStep;
+            _shapeCx = _cx;
+            _shapeCy = _cy;
+        }
+        var angles = [_hourAngle, _minuteAngle] as Array<Float>;
+        var starts = [0.24, 0.30] as Array<Float>;
+        var shapes = _handShapes as Array<Array<Array<Point2D> > >;
+        for (var i = 0; i < 2; i++) {
+            var a = polar(angles[i], _radius * starts[i]);
+            dc.setColor(_ink, Graphics.COLOR_TRANSPARENT);
+            dc.setPenWidth(2);
+            dc.drawLine(_cx, _cy, a[0], a[1]);
+            var hand = shapes[i];
+            dc.setColor(COLOR_BG, Graphics.COLOR_TRANSPARENT);
+            dc.fillPolygon(hand[0]);
+            dc.fillPolygon(hand[1]);
+            dc.setColor(_ink, Graphics.COLOR_TRANSPARENT);
+            dc.fillPolygon(hand[2]);
+            dc.fillPolygon(hand[3]);
+        }
     }
 
-    //! Skeleton hand: a rounded hollow bar on a thin stem, so the fields
-    //! show through the middle of the hand.
-    //! @param dc Device context
+    //! Outline shapes of a skeleton hand: a rounded bar on a thin stem
+    //! with an open middle, so the fields show through the hand. The
+    //! frame and its dark halo are each a stadium-shaped ring, split along
+    //! the hand's axis into two simple polygons for fillPolygon.
     //! @param angle Angle in radians, clockwise from 12 o'clock
     //! @param length Distance from center to tip
     //! @param width Bar width in pixels
     //! @param start Radius fraction where the bar begins
-    private function drawHand(dc as Dc, angle as Float, length as Float, width as Number,
-            start as Float) as Void {
-        var inner = _radius * start;
-        var a = polar(angle, inner);
-        var b = polar(angle, length - width / 2);
+    //! @return [halo left, halo right, frame left, frame right]
+    private function handShapes(angle as Float, length as Float, width as Number,
+            start as Float) as Array<Array<Point2D> > {
+        var from = _radius * start;
+        var to = length - width / 2.0;
+        var half = width / 2.0;
+        var holeHalf = (width - 5) / 2.0;
+        var holeFrom = from + width * 0.6;
+        var holeTo = length - width * 1.4;
+        return [
+            ringHalf(angle, from, to, half + 2, from, to, half, 1),
+            ringHalf(angle, from, to, half + 2, from, to, half, -1),
+            ringHalf(angle, from, to, half, holeFrom, holeTo, holeHalf, 1),
+            ringHalf(angle, from, to, half, holeFrom, holeTo, holeHalf, -1)
+        ] as Array<Array<Point2D> >;
+    }
 
-        dc.setColor(_ink, Graphics.COLOR_TRANSPARENT);
-        dc.setPenWidth(2);
-        dc.drawLine(_cx, _cy, a[0], a[1]);
-        roundLine(dc, a, b, width + 4, COLOR_BG);
-        roundLine(dc, a, b, width, _ink);
-        roundLine(dc, polar(angle, inner + width * 0.6), polar(angle, length - width * 1.4), width - 5, COLOR_BG);
+    //! One side of a ring between two stadiums (rounded bars) that lie
+    //! along the same radial axis.
+    //! @param angle Axis angle in radians, clockwise from 12 o'clock
+    //! @param from Outer stadium: distance of its back cap center
+    //! @param to Outer stadium: distance of its tip cap center
+    //! @param half Outer stadium: half width
+    //! @param holeFrom Inner stadium: distance of its back cap center
+    //! @param holeTo Inner stadium: distance of its tip cap center
+    //! @param holeHalf Inner stadium: half width
+    //! @param side 1 for the clockwise side, -1 for the other
+    //! @return Polygon points (at most 4 * ARC_POINTS)
+    private function ringHalf(angle as Float, from as Float, to as Float, half as Float,
+            holeFrom as Float, holeTo as Float, holeHalf as Float, side as Number) as Array<Point2D> {
+        var sinA = Math.sin(angle).toFloat();
+        var cosA = Math.cos(angle).toFloat();
+        var n = ARC_COS.size();
+        var points = new Array<Point2D>[4 * n];
+        for (var k = 0; k < n; k++) {
+            var c = ARC_COS[k] as Float;
+            var s = (ARC_SIN[k] as Float) * side;
+            // Outer tip cap, from the axis to the side, then the outer back
+            // cap from the side to the axis. The hole runs the other way.
+            points[k] = ringPoint(sinA, cosA, to + half * c, half * s);
+            points[2 * n - 1 - k] = ringPoint(sinA, cosA, from - half * c, half * s);
+            points[2 * n + k] = ringPoint(sinA, cosA, holeFrom - holeHalf * c, holeHalf * s);
+            points[4 * n - 1 - k] = ringPoint(sinA, cosA, holeTo + holeHalf * c, holeHalf * s);
+        }
+        return points;
+    }
+
+    //! Screen point at a distance along a radial axis plus an offset
+    //! across it.
+    //! @param sinA Sine of the axis angle
+    //! @param cosA Cosine of the axis angle
+    //! @param along Distance from the center along the axis
+    //! @param across Offset across the axis (positive is clockwise)
+    //! @return Screen point
+    private function ringPoint(sinA as Float, cosA as Float, along as Float, across as Float) as Point2D {
+        return [_cx + along * sinA + across * cosA, _cy - along * cosA + across * sinA] as Point2D;
     }
 
     //! Draw the open center hub.
@@ -1050,21 +1131,5 @@ class DataDialView extends WatchUi.WatchFace {
         dc.setPenWidth(pen);
         dc.drawLine(a[0], a[1], b[0], b[1]);
         dc.setPenWidth(1);
-    }
-
-    //! Draw a thick line with round ends.
-    //! @param dc Device context
-    //! @param a Start point
-    //! @param b End point
-    //! @param width Line width
-    //! @param color Line color
-    private function roundLine(dc as Dc, a as [Number, Number], b as [Number, Number],
-            width as Number, color as Number) as Void {
-        dc.setColor(color, Graphics.COLOR_TRANSPARENT);
-        dc.setPenWidth(width);
-        dc.drawLine(a[0], a[1], b[0], b[1]);
-        dc.setPenWidth(1);
-        dc.fillCircle(a[0], a[1], width / 2);
-        dc.fillCircle(b[0], b[1], width / 2);
     }
 }

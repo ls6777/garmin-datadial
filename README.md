@@ -12,7 +12,8 @@ Analog Connect IQ watch face for the Garmin fēnix 9 Pro 51mm (466×466 AMOLED).
 
 - **Dial:** a dot for every minute around the display edge, larger at the hours and
   largest at 12, 3, 6 and 9.
-- **Hands:** hollow hour and minute hands on thin stems, an open center hub, and a red
+- **Hands:** see-through hour and minute hands (outlines on thin stems, so the stats and
+  lines behind them stay visible), an open center hub, and a red
   seconds hand while the watch is awake. The minute hand moves every 10 seconds and the
   hour hand every 10 minutes.
 - **Stats:** eight sections divided by colored lines (blue by default), each with an icon

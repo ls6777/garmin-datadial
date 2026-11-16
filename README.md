@@ -74,10 +74,9 @@ need to be added to `manifest.xml`.
 ## Power
 
 - The dots, divider lines and icons are drawn once, into an off-screen image.
-- The stat values, goal gauges and the hour and minute hands are drawn into a second
-  image. Only the stat whose value changed is redrawn, and a hand is redrawn only when it
-  moves.
-- Each frame copies that image to the screen and draws the seconds hand and hub on top.
+- The stat values and goal gauges are drawn into a second image, and only the stat whose
+  value changed is redrawn.
+- Each frame copies that image to the screen and draws the hands on top.
 
 Before the goal gauges and temperature symbols were added, this took about 31 ms per
 frame in the simulator while awake, against 45 ms for the first, much simpler version of

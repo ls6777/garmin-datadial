@@ -2,6 +2,9 @@
     <string id="AppName">DataDial</string>
 
     <!-- Settings -->
+    <string id="ClockStyleTitle">Clock style</string>
+    <string id="ClockAnalog">Analog</string>
+    <string id="ClockDigital">Digital</string>
     <string id="AccentColorTitle">Lines and icons color</string>
     <string id="HeartColorTitle">Heart rate icon color</string>
     <string id="ColorBlue">Blue</string>

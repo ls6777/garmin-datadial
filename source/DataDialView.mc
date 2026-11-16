@@ -72,6 +72,15 @@ class DataDialView extends WatchUi.WatchFace {
     private const CHROME_SHADE = 0.84;
     private const CHROME_STOPS = [0.0, 0.15, 0.32, 0.42, 0.52, 0.70, 0.85, 1.0] as Array<Float>;
     private const CHROME_LEVELS = [255, 240, 214, 196, 220, 252, 232, 255] as Array<Number>;
+    //! Digital time: font size and the vertical offsets from the center of
+    //! the time and of the seconds below it, as fractions of the radius.
+    //! In digital mode the divider lines start further out
+    //! (DIGITAL_LINE_START) to make room.
+    private const TIME_SIZE = 0.32;
+    private const TIME_Y = -0.05;
+    private const SECONDS_Y = 0.18;
+    private const SECONDS_SIZE = 0.19;
+    private const DIGITAL_LINE_START = 0.40;
     private const COLOR_SLEEP = 0x9A9A9A;
     private const COLOR_SLEEP_MINOR = 0x5A5A5A;
 
@@ -138,6 +147,18 @@ class DataDialView extends WatchUi.WatchFace {
 
     //! User color settings: divider lines, stat icons and battery outline,
     //! and the heart rate icon.
+    //! Clock style setting: true for the digital time in the middle
+    //! instead of the hands.
+    private var _digital as Boolean = false;
+    private var _timeFont as Graphics.FontType = Graphics.FONT_NUMBER_MEDIUM;
+    private var _secondsFont as Graphics.FontType = Graphics.FONT_TINY;
+    //! Digital time: the text, the minute it shows (hour * 60 + minute), and
+    //! whether the composite image needs it redrawn.
+    private var _timeText as String = "";
+    private var _timeMinute as Number = -1;
+    private var _timeDirty as Boolean = false;
+    //! Width of the time as drawn in the composite, so it can be erased.
+    private var _timeWidth as Number = 0;
     private var _accentColor as Number = DEFAULT_ACCENT;
     private var _heartColor as Number = DEFAULT_HEART;
 
@@ -218,17 +239,18 @@ class DataDialView extends WatchUi.WatchFace {
     //! Read the user settings and redraw the cached images with them.
     //! Called at startup and when the settings change on the phone.
     public function loadSettings() as Void {
-        _accentColor = colorSetting("AccentColor", DEFAULT_ACCENT);
-        _heartColor = colorSetting("HeartColor", DEFAULT_HEART);
+        _accentColor = numberSetting("AccentColor", DEFAULT_ACCENT);
+        _heartColor = numberSetting("HeartColor", DEFAULT_HEART);
+        _digital = (numberSetting("ClockStyle", 0) == 1);
         _staticLayer = null;
         _dirtyAll = true;
     }
 
-    //! Read a color setting.
+    //! Read a number setting (a color or a list choice).
     //! @param key Property id
     //! @param fallback Color to use if the property is missing or invalid
     //! @return Color as 0xRRGGBB
-    private function colorSetting(key as String, fallback as Number) as Number {
+    private function numberSetting(key as String, fallback as Number) as Number {
         var value = Properties.getValue(key);
         return (value instanceof Number) ? value : fallback;
     }
@@ -242,6 +264,8 @@ class DataDialView extends WatchUi.WatchFace {
 
         _labelFont = vectorFont(["BionicBold", "RobotoCondensedBold"], 0.12, Graphics.FONT_XTINY);
         _valueFont = vectorFont(["BionicBold", "RobotoCondensedBold"], 0.165, Graphics.FONT_TINY);
+        _timeFont = vectorFont(["BionicBold", "RobotoCondensedBold"], TIME_SIZE, Graphics.FONT_NUMBER_MEDIUM);
+        _secondsFont = vectorFont(["BionicBold", "RobotoCondensedBold"], SECONDS_SIZE, Graphics.FONT_TINY);
         for (var i = 0; i < SLOT_COUNT; i++) {
             _slotFonts[i] = (VALUE_SIZES[i] == 0.165) ? _valueFont
                     : vectorFont(["BionicBold", "RobotoCondensedBold"], VALUE_SIZES[i], Graphics.FONT_SMALL);
@@ -278,6 +302,18 @@ class DataDialView extends WatchUi.WatchFace {
         }
 
         refreshValues(clockTime);
+        if (_digital) {
+            // The time is part of the cached composite image; the seconds
+            // change every frame, so they are drawn on top while awake.
+            updateTime(clockTime);
+            drawBackground(dc);
+            if (_awake) {
+                dc.setColor(COLOR_MINUTE_DOT, Graphics.COLOR_TRANSPARENT);
+                dc.drawText(_cx, _cy + (_radius * SECONDS_Y).toNumber(), _secondsFont, clockTime.sec.format("%02d"),
+                        Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+            }
+            return;
+        }
         updateHands(clockTime);
         drawBackground(dc);
         drawHands(dc);
@@ -474,6 +510,9 @@ class DataDialView extends WatchUi.WatchFace {
             drawDial(dc);
             drawFields(dc, true);
             drawFields(dc, false);
+            if (_digital) {
+                drawTime(dc);
+            }
             return;
         }
 
@@ -486,10 +525,13 @@ class DataDialView extends WatchUi.WatchFace {
         if (composite == null) {
             dc.drawBitmap(0, 0, layer);
             drawFields(dc, false);
+            if (_digital) {
+                drawTime(dc);
+            }
             return;
         }
 
-        if (_dirtyAll || _dirtySlots != 0) {
+        if (_dirtyAll || _dirtySlots != 0 || _timeDirty) {
             var compositeDc = composite.getDc();
             if (compositeDc has :setAntiAlias) {
                 compositeDc.setAntiAlias(true);
@@ -500,15 +542,22 @@ class DataDialView extends WatchUi.WatchFace {
                 for (var i = 0; i < SLOT_COUNT; i++) {
                     _drawnWidth[i] = compositeDc.getTextWidthInPixels(_values[i], valueFont(i));
                 }
+                if (_digital) {
+                    _timeWidth = drawTime(compositeDc);
+                }
             } else {
                 for (var i = 0; i < SLOT_COUNT; i++) {
                     if ((_dirtySlots & (1 << i)) != 0) {
                         redrawSlot(compositeDc, layer, i);
                     }
                 }
+                if (_timeDirty && _digital) {
+                    redrawTime(compositeDc, layer);
+                }
             }
             _dirtyAll = false;
             _dirtySlots = 0;
+            _timeDirty = false;
         }
 
         // The composite covers the whole screen, so copy it without blending.
@@ -615,7 +664,7 @@ class DataDialView extends WatchUi.WatchFace {
     //! @param slot Field slot
     private function drawFieldFixed(dc as Dc, slot as Number) as Void {
         var angle = slot / SLOT_COUNT.toFloat() * Math.PI * 2;
-        radialLine(dc, angle + Math.PI / SLOT_COUNT, 0.30, 0.86, 2, _accentColor);
+        radialLine(dc, angle + Math.PI / SLOT_COUNT, _digital ? DIGITAL_LINE_START : 0.30, 0.86, 2, _accentColor);
         var icon = _icons[slot];
         if (icon != null) {
             // The icons are white masks, tinted to the user's color.
@@ -916,6 +965,58 @@ class DataDialView extends WatchUi.WatchFace {
         }
     }
 
+    // ---------------------------------------------------------- digital time
+
+    //! Update the digital time text when the minute changes. Follows the
+    //! watch's 12/24-hour setting; 12-hour time has no leading zero.
+    //! @param clockTime Current clock time
+    private function updateTime(clockTime as System.ClockTime) as Void {
+        var minute = clockTime.hour * 60 + clockTime.min;
+        if (minute == _timeMinute) {
+            return;
+        }
+        _timeMinute = minute;
+        var hour = clockTime.hour;
+        var text;
+        if (System.getDeviceSettings().is24Hour) {
+            text = hour.format("%02d") + ":" + clockTime.min.format("%02d");
+        } else {
+            hour = hour % 12;
+            text = ((hour == 0) ? 12 : hour).toString() + ":" + clockTime.min.format("%02d");
+        }
+        if (!text.equals(_timeText)) {
+            _timeText = text;
+            _timeDirty = true;
+        }
+    }
+
+    //! Draw the digital time in the middle of the dial, a little above
+    //! center to leave room for the seconds.
+    //! @param dc Device context
+    //! @return Width of the text in pixels
+    private function drawTime(dc as Dc) as Number {
+        dc.setColor(_ink, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(_cx, _cy + (_radius * TIME_Y).toNumber(), _timeFont, _timeText,
+                Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        return dc.getTextWidthInPixels(_timeText, _timeFont);
+    }
+
+    //! Redraw the time in the composite: restore the static layer under the
+    //! old and new text, then draw the new time. Nothing else is drawn in
+    //! the middle of the dial.
+    //! @param dc Device context of the composite image
+    //! @param layer The static layer
+    private function redrawTime(dc as Dc, layer as BufferedBitmap) as Void {
+        var width = dc.getTextWidthInPixels(_timeText, _timeFont);
+        var clearWidth = ((width > _timeWidth) ? width : _timeWidth) + 8;
+        var clearHeight = dc.getFontHeight(_timeFont) + 4;
+        var y = _cy + (_radius * TIME_Y).toNumber();
+        dc.setClip(_cx - clearWidth / 2, y - clearHeight / 2, clearWidth, clearHeight);
+        dc.drawBitmap(0, 0, layer);
+        _timeWidth = drawTime(dc);
+        dc.clearClip();
+    }
+
     // --------------------------------------------------------------- hands
 
     //! Move the hour and minute hands in steps: the minute hand every
@@ -1150,8 +1251,8 @@ class DataDialView extends WatchUi.WatchFace {
     }
 
     //! Burn-in-safe sleep face (only used if always-on is enabled on AMOLED):
-    //! the dot dial and the hollow hour and minute hands, dimmed, with no
-    //! stats and no seconds hand. Following Garmin's always-on guidance
+    //! the dot dial and the hour and minute hands (or the digital time),
+    //! dimmed, with no stats and no seconds hand. Following Garmin's always-on guidance
     //! (move static elements up to four pixels every minute), everything is
     //! shifted by up to 2 px, cycling through nine positions, one per minute.
     //! @param dc Device context
@@ -1165,10 +1266,15 @@ class DataDialView extends WatchUi.WatchFace {
         _ink = COLOR_SLEEP;
         _inkMinor = COLOR_SLEEP_MINOR;
 
-        updateHands(clockTime);
         drawDial(dc);
-        drawHands(dc);
-        drawCap(dc);
+        if (_digital) {
+            updateTime(clockTime);
+            drawTime(dc);
+        } else {
+            updateHands(clockTime);
+            drawHands(dc);
+            drawCap(dc);
+        }
 
         _cx -= shiftX;
         _cy -= shiftY;

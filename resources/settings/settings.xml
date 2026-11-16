@@ -1,5 +1,11 @@
 <!-- Settings shown in the Connect IQ and Garmin Connect phone apps. -->
 <settings>
+    <setting propertyKey="@Properties.ClockStyle" title="@Strings.ClockStyleTitle">
+        <settingConfig type="list">
+            <listEntry value="0">@Strings.ClockAnalog</listEntry>
+            <listEntry value="1">@Strings.ClockDigital</listEntry>
+        </settingConfig>
+    </setting>
     <setting propertyKey="@Properties.AccentColor" title="@Strings.AccentColorTitle">
         <settingConfig type="list">
             <listEntry value="3056626">@Strings.ColorBlue</listEntry>

@@ -53,14 +53,20 @@ shows as `--`. Elevation and temperature follow the watch's unit settings (ft/m,
 
 In the Connect IQ or Garmin Connect phone app, under DataDial's settings:
 
-| Setting | Colors | Default |
+| Setting | What it changes | Default |
 |---|---|---|
+| Clock style | Analog (hands) or Digital (the time in the middle, no hands) | Analog |
 | Lines and icons color | Divider lines, stat icons and the battery outline | Blue |
 | Heart rate icon color | Heart icon only | Red |
 
-Each offers Blue, Cyan, Green, Yellow, Orange, Red, Pink, Purple, White and Gray. The
-icons are stored white and tinted as they're drawn. Warning colors stay fixed: low battery
-red, charging green, the goal colors, and the cold and hot temperature colors.
+The digital time follows the watch's 12/24-hour setting, with the seconds below it while
+the watch is awake; the divider lines start further out to make room. The time itself is
+redrawn once a minute. In always-on mode it is shown dimmed with the dial, without seconds.
+
+The two color settings each offer Blue, Cyan, Green, Yellow, Orange, Red, Pink, Purple,
+White and Gray. The icons are stored white and tinted as they're drawn. Warning colors
+stay fixed: low battery red, charging green, the goal colors, and the cold and hot
+temperature colors.
 
 Phone settings only reach a copy installed from the Connect IQ Store (or uploaded there as
 a beta app). A `.prg` copied over USB always uses the defaults. In the simulator, change

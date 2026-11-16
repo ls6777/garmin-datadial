@@ -5,4 +5,6 @@
     <property id="AccentColor" type="number">3056626</property>
     <!-- Heart rate icon. Default red 0xFF5A5A. -->
     <property id="HeartColor" type="number">16734810</property>
+    <!-- Clock style: 0 analog hands, 1 digital time in the middle. -->
+    <property id="ClockStyle" type="number">0</property>
 </properties>

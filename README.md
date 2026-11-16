@@ -2,20 +2,26 @@
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/ls6777)
 
-Analog Connect IQ watch face for the Garmin fēnix 9 Pro 51mm (466×466 AMOLED).
+Connect IQ watch face for the Garmin fēnix 9 and fēnix 9 Pro AMOLED watches (all sizes),
+with eight stats around the dial. The time is shown either with analog hands or as a large
+digital time in the middle, chosen in the face's settings (analog by default).
 
-![DataDial in the Connect IQ simulator](docs/screenshot.png)
+![DataDial in the Connect IQ simulator, analog and digital](docs/screenshot.png)
 
-*Simulator screenshot of the test build (`./build.sh test`), which shows fixed worst-case values to check the layout: 25,000 steps (60% of goal), 110 floors (goal met), 3,500 calories, heart rate 160, 13,000 ft, 110° (hot), 100% battery with 31 days left. Its clock is fixed at 12:41:26 so the hands lie along the divider lines.*
+*Simulator screenshots of the test build (`./build.sh test`), analog (left) and digital (right). The test build shows fixed worst-case values to check the layout: 25,000 steps (60% of goal), 110 floors (goal met), 3,500 calories, heart rate 160, 13,000 ft, 110° (hot), 100% battery with 31 days left. Its clock is fixed at 12:41:26 so the hands lie along the divider lines.*
 
 ## The face
 
 - **Dial:** a dot for every minute around the display edge, larger at the hours and
   largest at 12, 3, 6 and 9.
-- **Hands:** see-through bright steel hour and minute hands (outlines on thin stems, so the
-  stats and lines behind them stay visible), an open center hub, and a red
-  seconds hand while the watch is awake. The minute hand moves every 10 seconds and the
-  hour hand every 10 minutes.
+- **Clock style:** analog or digital, set in the phone app (see [Settings](#settings)).
+  - **Analog (default):** see-through bright steel hour and minute hands (outlines on thin
+    stems, so the stats and lines behind them stay visible), an open center hub, and a red
+    seconds hand while the watch is awake. The minute hand moves every 10 seconds and the
+    hour hand every 10 minutes.
+  - **Digital:** no hands; a large time in the middle, following the watch's 12/24-hour
+    setting, with the seconds below it while the watch is awake. The divider lines start
+    further out to make room.
 - **Stats:** eight sections divided by colored lines (blue by default), each with an icon
   in the same color toward the center and a white value toward the edge. The heart rate
   icon has its own color (red by default). Short values (heart rate, floors, temperature,
@@ -45,9 +51,9 @@ shows as `--`. Elevation and temperature follow the watch's unit settings (ft/m,
 - **Temperature:** below 40 °F (4.4 °C) the value turns ice blue with a snowflake above it;
   above 90 °F (32.2 °C) it turns red with rising heat waves above it.
 - **Always-on mode:** if always-on display is enabled, the sleeping watch shows the dot
-  dial and the hour and minute hands in dim gray, with no stats or seconds hand. Everything
-  shifts by up to 2 px each minute to prevent burn-in. The simulator's 24-hour burn-in check
-  reports no burn-in, at about 1% luminance.
+  dial and the hour and minute hands (or the digital time) in dim gray, with no stats or
+  seconds. Everything shifts by up to 2 px each minute to prevent burn-in. The simulator's
+  24-hour burn-in check reports no burn-in, at about 1% luminance.
 
 ## Settings
 
@@ -82,7 +88,9 @@ need to be added to `manifest.xml`.
 - The dots, divider lines and icons are drawn once, into an off-screen image.
 - The stat values and goal gauges are drawn into a second image, and only the stat whose
   value changed is redrawn.
-- Each frame copies that image to the screen and draws the hands on top.
+- Each frame copies that image to the screen and draws the hands on top. In digital mode
+  the time is part of that image and redrawn once a minute; only the seconds are drawn
+  each frame.
 
 Before the goal gauges and temperature symbols were added, this took about 31 ms per
 frame in the simulator while awake, against 45 ms for the first, much simpler version of
@@ -99,7 +107,7 @@ profiled. All of these are PC timings, useful for comparing versions, not as wat
 | `source/Metrics.mc` | Reads and formats each value |
 | `source/TestValues.mc` | Fixed values and clock time for the test build; does nothing in the normal build |
 | `resources/drawables/` | Stat icons (white SVG masks, stored as PNG for smooth edges) |
-| `resources/settings/` | Color settings: properties and the phone-app settings page |
+| `resources/settings/` | Clock style and color settings: properties and the phone-app settings page |
 | `tools/PushSettings.java` | Sends the settings file to the simulator (used by `build.sh`) |
 | `monkey.jungle` | Normal build |
 | `monkey.test.jungle` | Test build with fixed values |

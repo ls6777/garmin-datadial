@@ -58,6 +58,20 @@ class DataDialView extends WatchUi.WatchFace {
     //! radius, to leave room for its gauge.
     private const STEPS_VALUE_SHIFT = 0.045;
     //! Dimmed colors used by the always-on sleep view.
+    //! Chrome hands: flat colors for the lit and shaded sides, used if
+    //! the chrome textures can't be built (see buildChrome).
+    private const COLOR_CHROME_LIGHT = 0xE9ECF0;
+    private const COLOR_CHROME_DARK = 0x8C939B;
+    //! Plain silver for the hub and the thin stems: too small for the
+    //! texture to show, and much quicker to fill.
+    private const COLOR_STEEL = 0xD4D8DD;
+    //! Chrome texture: tile size in pixels, the brightness of the shaded
+    //! side, and the reflection pattern as brightness levels (0-255) at
+    //! positions along it (0-1).
+    private const CHROME_SIZE = 128;
+    private const CHROME_SHADE = 0.84;
+    private const CHROME_STOPS = [0.0, 0.15, 0.32, 0.42, 0.52, 0.70, 0.85, 1.0] as Array<Float>;
+    private const CHROME_LEVELS = [255, 240, 214, 196, 220, 252, 232, 255] as Array<Number>;
     private const COLOR_SLEEP = 0x9A9A9A;
     private const COLOR_SLEEP_MINOR = 0x5A5A5A;
 
@@ -175,6 +189,20 @@ class DataDialView extends WatchUi.WatchFace {
     private var _shapeStep as Number = -1;
     private var _shapeCx as Number = 0;
     private var _shapeCy as Number = 0;
+    //! Chrome textures for the hands [lit side, shaded side], built on
+    //! first use (see buildChrome).
+    private var _chrome as Array<BitmapTexture>?;
+    private var _chromeTried as Boolean = false;
+    //! Bounding box [x0, y0, x1, y1] of each hand [hour, minute], built
+    //! with the hand shapes.
+    private var _handBoxes as Array<Array<Number> > = [[0, 0, 0, 0], [0, 0, 0, 0]] as Array<Array<Number> >;
+    //! The hour and minute hands are drawn into the composite image (see
+    //! drawBackground). The hand step and boxes they were drawn with, so
+    //! the old hands can be erased when they move.
+    private var _compositeHandStep as Number = -1;
+    private var _compositeBoxes as Array<Array<Number> >?;
+    //! true when this frame's composite already holds the hands.
+    private var _handsCached as Boolean = false;
     //! Width in pixels of each value as currently drawn in the stats image,
     //! so the old text can be erased when a value changes.
     private var _drawnWidth as Array<Number> = [0, 0, 0, 0, 0, 0, 0, 0] as Array<Number>;
@@ -262,14 +290,16 @@ class DataDialView extends WatchUi.WatchFace {
         refreshValues(clockTime);
         updateHands(clockTime);
         drawBackground(dc);
-        drawHands(dc);
+        if (!_handsCached) {
+            drawHands(dc);
+        }
 
         if (_awake) {
             var secondAngle = clockTime.sec / 60.0 * Math.PI * 2;
             var tip = polar(secondAngle, _radius * 0.92);
             var tail = polar(secondAngle + Math.PI, _radius * 0.30);
-            dc.setColor(COLOR_RED, Graphics.COLOR_TRANSPARENT);
             dc.setPenWidth(2);
+            dc.setColor(COLOR_RED, Graphics.COLOR_TRANSPARENT);
             dc.drawLine(tail[0], tail[1], tip[0], tip[1]);
             dc.setPenWidth(1);
         }
@@ -432,11 +462,14 @@ class DataDialView extends WatchUi.WatchFace {
 
     // ------------------------------------------------------ dial and stats
 
-    //! Paint the dial and stats from cached images.
+    //! Paint the dial, stats and hour and minute hands from cached images.
     //! The static layer (dots, divider lines, icons) is drawn once. The
-    //! composite (static layer plus stat values) is copied to the screen
-    //! every frame; when a value changes only that value's area is redrawn.
-    //! If an image cannot be allocated, the missing part is drawn directly.
+    //! composite (static layer plus stat values plus the hour and minute
+    //! hands) is copied to the screen every frame. When a value changes only
+    //! that value's area is redrawn; when a hand moves, only the area its old
+    //! and new positions cover. Any hand crossing a redrawn area is drawn
+    //! again there. If an image cannot be allocated, the missing parts
+    //! (including the hands) are drawn directly.
     //! @param dc Device context
     private function drawBackground(dc as Dc) as Void {
         var layer = (_staticLayer != null) ? _staticLayer.get() as BufferedBitmap? : null;
@@ -451,6 +484,7 @@ class DataDialView extends WatchUi.WatchFace {
             }
             _dirtyAll = true;
         }
+        _handsCached = false;
         if (layer == null) {
             clearScreen(dc);
             drawDial(dc);
@@ -471,27 +505,50 @@ class DataDialView extends WatchUi.WatchFace {
             return;
         }
 
-        if (_dirtyAll || _dirtySlots != 0) {
+        var handsMoved = (_compositeHandStep != _handStep);
+        if (_dirtyAll || _dirtySlots != 0 || handsMoved) {
             var compositeDc = composite.getDc();
             if (compositeDc has :setAntiAlias) {
                 compositeDc.setAntiAlias(true);
             }
-            if (_dirtyAll) {
+            updateHandShapes();
+            var oldBoxes = _compositeBoxes;
+            if (_dirtyAll || oldBoxes == null) {
                 compositeDc.drawBitmap(0, 0, layer);
                 drawFields(compositeDc, false);
                 for (var i = 0; i < SLOT_COUNT; i++) {
                     _drawnWidth[i] = compositeDc.getTextWidthInPixels(_values[i], valueFont(i));
                 }
+                drawHands(compositeDc);
             } else {
+                if (handsMoved) {
+                    // Erase each moved hand and draw it in its new place,
+                    // touching only the area the two positions cover.
+                    for (var i = 0; i < 2; i++) {
+                        var was = oldBoxes[i];
+                        var now = _handBoxes[i];
+                        if (was[0] != now[0] || was[1] != now[1] || was[2] != now[2] || was[3] != now[3]) {
+                            var x0 = (was[0] < now[0]) ? was[0] : now[0];
+                            var y0 = (was[1] < now[1]) ? was[1] : now[1];
+                            var x1 = (was[2] > now[2]) ? was[2] : now[2];
+                            var y1 = (was[3] > now[3]) ? was[3] : now[3];
+                            restoreArea(compositeDc, layer, -1, x0, y0, x1 - x0, y1 - y0);
+                        }
+                    }
+                }
                 for (var i = 0; i < SLOT_COUNT; i++) {
                     if ((_dirtySlots & (1 << i)) != 0) {
                         redrawSlot(compositeDc, layer, i);
                     }
                 }
+                compositeDc.clearClip();
             }
+            _compositeBoxes = [_handBoxes[0], _handBoxes[1]] as Array<Array<Number> >;
+            _compositeHandStep = _handStep;
             _dirtyAll = false;
             _dirtySlots = 0;
         }
+        _handsCached = true;
 
         // The composite covers the whole screen, so copy it without blending.
         if (dc has :setBlendMode) {
@@ -530,34 +587,53 @@ class DataDialView extends WatchUi.WatchFace {
         clearWidth += 8;
         clearHeight += 6;
 
-        dc.setClip(outer[0] - clearWidth / 2, outer[1] - clearHeight / 2, clearWidth, clearHeight);
-        dc.drawBitmap(0, 0, layer);
-        drawFieldLive(dc, slot);
+        restoreArea(dc, layer, slot, outer[0] - clearWidth / 2, outer[1] - clearHeight / 2, clearWidth, clearHeight);
 
         if (slot == SLOT_BATTERY) {
             // The gauge and charging bolt change with the value.
             var inner = polar(angle, _radius * 0.38);
             var half = (_iconSize * 0.6).toNumber() + 3;
-            dc.setClip(inner[0] - half, inner[1] - half, 2 * half, 2 * half);
-            dc.drawBitmap(0, 0, layer);
-            drawFieldLive(dc, slot);
+            restoreArea(dc, layer, slot, inner[0] - half, inner[1] - half, 2 * half, 2 * half);
         }
         if (slot == SLOT_TEMPERATURE) {
             var flake = tempSymbolPosition();
             var half = tempSymbolRadius() + 4;
-            dc.setClip(flake[0] - half, flake[1] - half, 2 * half, 2 * half);
-            dc.drawBitmap(0, 0, layer);
-            drawFieldLive(dc, slot);
+            restoreArea(dc, layer, slot, flake[0] - half, flake[1] - half, 2 * half, 2 * half);
         }
         if (_progress[slot] >= 0) {
             var box = gaugeBounds(slot);
-            dc.setClip(box[0], box[1], box[2] - box[0], box[3] - box[1]);
-            dc.drawBitmap(0, 0, layer);
-            // The box can reach into the value text, so redraw all of the
-            // stat's live parts, not just the gauge.
-            drawFieldLive(dc, slot);
+            // The box can reach into the value text, so this redraws all
+            // of the stat's live parts, not just the gauge.
+            restoreArea(dc, layer, slot, box[0], box[1], box[2] - box[0], box[3] - box[1]);
         }
         dc.clearClip();
+    }
+
+    //! Redraw one rectangle of the composite: the static layer, the live
+    //! parts of one stat (or of all stats), then any hand that crosses it.
+    //! Leaves the clip set to the rectangle.
+    //! @param dc Device context of the composite image
+    //! @param layer The static layer
+    //! @param slot Stat whose live parts to draw, or -1 for all stats
+    //! @param x Left edge
+    //! @param y Top edge
+    //! @param w Width
+    //! @param h Height
+    private function restoreArea(dc as Dc, layer as BufferedBitmap, slot as Number,
+            x as Number, y as Number, w as Number, h as Number) as Void {
+        dc.setClip(x, y, w, h);
+        dc.drawBitmap(0, 0, layer);
+        if (slot < 0) {
+            drawFields(dc, false);
+        } else {
+            drawFieldLive(dc, slot);
+        }
+        for (var i = 0; i < 2; i++) {
+            var box = _handBoxes[i];
+            if (box[0] < x + w && box[2] > x && box[1] < y + h && box[3] > y) {
+                drawHand(dc, i);
+            }
+        }
     }
 
 
@@ -902,9 +978,9 @@ class DataDialView extends WatchUi.WatchFace {
 
     //! Move the hour and minute hands in steps: the minute hand every
     //! MINUTE_HAND_STEP seconds and the hour hand every HOUR_HAND_STEP
-    //! minutes. The hands are drawn straight to the screen each frame:
-    //! profiling showed that drawing them into the cached image costs more
-    //! than it saves.
+    //! minutes. The steel hands are slow to fill, so they are kept in the
+    //! cached composite image and redrawn only when they move (see
+    //! drawBackground).
     //! @param clockTime Current clock time
     private function updateHands(clockTime as System.ClockTime) as Void {
         var seconds = clockTime.sec - clockTime.sec % MINUTE_HAND_STEP;
@@ -919,58 +995,181 @@ class DataDialView extends WatchUi.WatchFace {
         _minuteAngle = (clockTime.min + seconds / 60.0) / 60.0 * Math.PI * 2;
     }
 
-    //! Draw the hour and minute hands at their current stepped angles. The
-    //! outline shapes are rebuilt only when a hand moves or the center
-    //! shifts (always-on burn-in shift).
+    //! Rebuild the hand outline shapes (and their bounding boxes) if a
+    //! hand moved or the center shifted (always-on burn-in shift).
+    private function updateHandShapes() as Void {
+        if (_handShapes != null && _shapeStep == _handStep && _shapeCx == _cx && _shapeCy == _cy) {
+            return;
+        }
+        _handShapes = [
+            handShapes(_hourAngle, _radius * 0.52, 13, 0.24),
+            handShapes(_minuteAngle, _radius * 0.86, 11, 0.30)
+        ] as Array<Array<Array<Point2D> > >;
+        for (var i = 0; i < 2; i++) {
+            // The edge polygons are the outermost; the stem reaches the center.
+            var hand = (_handShapes as Array<Array<Array<Point2D> > >)[i];
+            var x0 = _cx;
+            var y0 = _cy;
+            var x1 = _cx;
+            var y1 = _cy;
+            for (var side = 0; side < 2; side++) {
+                var points = hand[side];
+                for (var k = 0; k < points.size(); k++) {
+                    var x = points[k][0].toNumber();
+                    var y = points[k][1].toNumber();
+                    x0 = (x < x0) ? x : x0;
+                    y0 = (y < y0) ? y : y0;
+                    x1 = (x > x1) ? x : x1;
+                    y1 = (y > y1) ? y : y1;
+                }
+            }
+            // A margin for anti-aliased edges.
+            _handBoxes[i] = [x0 - 3, y0 - 3, x1 + 4, y1 + 4] as Array<Number>;
+        }
+        _shapeStep = _handStep;
+        _shapeCx = _cx;
+        _shapeCy = _cy;
+    }
+
+    //! Draw the hour and minute hands at their current stepped angles.
+    //! While awake they are bright steel (see buildChrome); in always-on
+    //! mode they are flat and dim.
     //! @param dc Device context
     private function drawHands(dc as Dc) as Void {
-        if (_handShapes == null || _shapeStep != _handStep || _shapeCx != _cx || _shapeCy != _cy) {
-            _handShapes = [
-                handShapes(_hourAngle, _radius * 0.52, 12, 0.24),
-                handShapes(_minuteAngle, _radius * 0.86, 10, 0.30)
-            ] as Array<Array<Array<Point2D> > >;
-            _shapeStep = _handStep;
-            _shapeCx = _cx;
-            _shapeCy = _cy;
+        updateHandShapes();
+        drawHand(dc, 0);
+        drawHand(dc, 1);
+    }
+
+    //! Draw one hand: a thin stem from the center, then the hollow frame
+    //! with a 1 px dark edge, bright on the side facing the light (upper
+    //! left) and darker on the other, like a polished bevel.
+    //! @param dc Device context
+    //! @param index 0 for the hour hand, 1 for the minute hand
+    private function drawHand(dc as Dc, index as Number) as Void {
+        var chrome = (_ink == COLOR_WHITE);
+        if (chrome && !_chromeTried && (dc has :setFill)) {
+            buildChrome();
         }
-        var angles = [_hourAngle, _minuteAngle] as Array<Float>;
-        var starts = [0.24, 0.30] as Array<Float>;
-        var shapes = _handShapes as Array<Array<Array<Point2D> > >;
-        for (var i = 0; i < 2; i++) {
-            var a = polar(angles[i], _radius * starts[i]);
+        var angle = (index == 0) ? _hourAngle : _minuteAngle;
+        var a = polar(angle, _radius * ((index == 0) ? 0.24 : 0.30));
+        var hand = (_handShapes as Array<Array<Array<Point2D> > >)[index];
+        var litFirst = (-Math.cos(angle) - Math.sin(angle)) > 0;
+
+        dc.setColor(COLOR_BG, Graphics.COLOR_TRANSPARENT);
+        dc.setPenWidth(4);
+        dc.drawLine(_cx, _cy, a[0], a[1]);
+        dc.fillPolygon(hand[0]);
+        dc.fillPolygon(hand[1]);
+        dc.setPenWidth(2);
+        dc.setColor(chrome ? COLOR_STEEL : _ink, Graphics.COLOR_TRANSPARENT);
+        dc.drawLine(_cx, _cy, a[0], a[1]);
+        setChrome(dc, chrome, litFirst);
+        dc.fillPolygon(hand[2]);
+        setChrome(dc, chrome, !litFirst);
+        dc.fillPolygon(hand[3]);
+        dc.setPenWidth(1);
+    }
+
+    //! Set the fill and pen for one side of a hand.
+    //! @param dc Device context
+    //! @param chrome true for chrome, false for the flat always-on color
+    //! @param lit true for the side facing the light
+    private function setChrome(dc as Dc, chrome as Boolean, lit as Boolean) as Void {
+        if (!chrome) {
             dc.setColor(_ink, Graphics.COLOR_TRANSPARENT);
-            dc.setPenWidth(2);
-            dc.drawLine(_cx, _cy, a[0], a[1]);
-            var hand = shapes[i];
-            dc.setColor(COLOR_BG, Graphics.COLOR_TRANSPARENT);
-            dc.fillPolygon(hand[0]);
-            dc.fillPolygon(hand[1]);
-            dc.setColor(_ink, Graphics.COLOR_TRANSPARENT);
-            dc.fillPolygon(hand[2]);
-            dc.fillPolygon(hand[3]);
+            return;
+        }
+        var textures = _chrome;
+        if (textures != null) {
+            var texture = textures[lit ? 0 : 1];
+            dc.setFill(texture);
+            dc.setStroke(texture);
+            return;
+        }
+        dc.setColor(lit ? COLOR_CHROME_LIGHT : COLOR_CHROME_DARK, Graphics.COLOR_TRANSPARENT);
+    }
+
+    //! Build the chrome textures for the hands: small images of soft
+    //! diagonal bands of light and dark, like the reflections on polished
+    //! metal. The texture is fixed to the screen, so the reflections slide
+    //! along a hand as it turns. One image is for the side of a hand facing
+    //! the light, a darker one for the other side. Built once; if images are
+    //! not available the hands use two flat grays instead.
+    private function buildChrome() as Void {
+        _chromeTried = true;
+        if (!(Graphics has :createBufferedBitmap) || !(Graphics has :BitmapTexture)) {
+            return;
+        }
+        try {
+            var textures = [] as Array<BitmapTexture>;
+            var size = CHROME_SIZE;
+            for (var side = 0; side < 2; side++) {
+                var bitmap = Graphics.createBufferedBitmap({ :width => size, :height => size }).get() as BufferedBitmap;
+                var bdc = bitmap.getDc();
+                bdc.setPenWidth(1);
+                // Each diagonal x + y = k gets one shade, repeating every
+                // CHROME_SIZE pixels so the image tiles without seams.
+                for (var k = 0; k < 2 * size - 1; k++) {
+                    bdc.setColor(chromeColor((k % size) / size.toFloat(), (side == 0) ? 1.0 : CHROME_SHADE),
+                            Graphics.COLOR_TRANSPARENT);
+                    var x0 = (k < size) ? 0 : k - size + 1;
+                    var x1 = (k < size) ? k : size - 1;
+                    bdc.drawLine(x0, k - x0, x1, k - x1);
+                    bdc.drawPoint(x1, k - x1);
+                }
+                textures.add(new Graphics.BitmapTexture({ :bitmap => bitmap }));
+            }
+            _chrome = textures;
+        } catch (e) {
+            _chrome = null;
         }
     }
 
+    //! Shade of the chrome reflection pattern.
+    //! @param t Position in the pattern, 0 to 1
+    //! @param scale Brightness factor (1 for the lit side)
+    //! @return Color (a cool, slightly blue gray)
+    private function chromeColor(t as Float, scale as Float) as Number {
+        var level = (CHROME_LEVELS[0] as Number).toFloat();
+        for (var i = 1; i < CHROME_STOPS.size(); i++) {
+            var stop = CHROME_STOPS[i] as Float;
+            if (t <= stop) {
+                var prev = CHROME_STOPS[i - 1] as Float;
+                var f = (t - prev) / (stop - prev);
+                f = f * f * (3 - 2 * f);
+                var low = (CHROME_LEVELS[i - 1] as Number).toFloat();
+                level = low + ((CHROME_LEVELS[i] as Number) - low) * f;
+                break;
+            }
+        }
+        level = level * scale;
+        var r = (level * 0.95).toNumber();
+        var g = (level * 0.975).toNumber();
+        var b = level.toNumber();
+        return (r << 16) | (g << 8) | b;
+    }
+
     //! Outline shapes of a skeleton hand: a rounded bar on a thin stem
-    //! with an open middle, so the fields show through the hand. The
-    //! frame and its dark halo are each a stadium-shaped ring, split along
-    //! the hand's axis into two simple polygons for fillPolygon.
+    //! with an open middle, so the fields show through the hand. The frame
+    //! and its 1 px dark edge (inside and out) are stadium-shaped rings,
+    //! split along the hand's axis into two simple polygons for fillPolygon.
     //! @param angle Angle in radians, clockwise from 12 o'clock
     //! @param length Distance from center to tip
     //! @param width Bar width in pixels
     //! @param start Radius fraction where the bar begins
-    //! @return [halo left, halo right, frame left, frame right]
+    //! @return [edge side 1, edge side 2, frame side 1, frame side 2]
     private function handShapes(angle as Float, length as Float, width as Number,
             start as Float) as Array<Array<Point2D> > {
         var from = _radius * start;
         var to = length - width / 2.0;
         var half = width / 2.0;
-        var holeHalf = (width - 5) / 2.0;
+        var holeHalf = (width - 6) / 2.0;
         var holeFrom = from + width * 0.6;
         var holeTo = length - width * 1.4;
         return [
-            ringHalf(angle, from, to, half + 2, from, to, half, 1),
-            ringHalf(angle, from, to, half + 2, from, to, half, -1),
+            ringHalf(angle, from, to, half + 1, holeFrom + 1, holeTo - 1, holeHalf - 1, 1),
+            ringHalf(angle, from, to, half + 1, holeFrom + 1, holeTo - 1, holeHalf - 1, -1),
             ringHalf(angle, from, to, half, holeFrom, holeTo, holeHalf, 1),
             ringHalf(angle, from, to, half, holeFrom, holeTo, holeHalf, -1)
         ] as Array<Array<Point2D> >;
@@ -1022,8 +1221,8 @@ class DataDialView extends WatchUi.WatchFace {
     private function drawCap(dc as Dc) as Void {
         var r = (_radius * 0.028).toNumber();
         dc.setColor(COLOR_BG, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(_cx, _cy, r + 2);
-        dc.setColor(_ink, Graphics.COLOR_TRANSPARENT);
+        dc.fillCircle(_cx, _cy, r + 1);
+        dc.setColor((_ink == COLOR_WHITE) ? COLOR_STEEL : _ink, Graphics.COLOR_TRANSPARENT);
         dc.fillCircle(_cx, _cy, r);
         dc.setColor(COLOR_BG, Graphics.COLOR_TRANSPARENT);
         dc.fillCircle(_cx, _cy, r / 3);
